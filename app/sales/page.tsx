@@ -75,13 +75,14 @@ export default function SalesPage() {
 
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
-  const [customerDni, setCustomerDni] = useState("")
+  const [customerDocumentType, setCustomerDocumentType] = useState<"dni" | "cee">("dni")
+  const [customerDocumentNumber, setCustomerDocumentNumber] = useState("")
   const [customerDepartment, setCustomerDepartment] = useState("")
   const [customerProvince, setCustomerProvince] = useState("")
   const [customerDistrict, setCustomerDistrict] = useState("")
   const [customerAddress, setCustomerAddress] = useState("")
   const [dniLoading, setDniLoading] = useState(false)
-  const [lastDniQueried, setLastDniQueried] = useState("")
+  const [lastDocumentQueried, setLastDocumentQueried] = useState("")
 
   const [paymentMethod, setPaymentMethod] = useState("efectivo")
   const [paymentDetail, setPaymentDetail] = useState("")
@@ -242,6 +243,16 @@ export default function SalesPage() {
     }
   }, [serialMatches])
 
+  useEffect(() => {
+    setCustomerDocumentNumber("")
+    setLastDocumentQueried("")
+    setCustomerName("")
+    setCustomerDepartment("")
+    setCustomerProvince("")
+    setCustomerDistrict("")
+    setCustomerAddress("")
+  }, [customerDocumentType])
+
   const currentProduct = availableProducts.find((p) => p.id === selectedProduct)
   const totalPreview = currentProduct ? Number(currentProduct.price) * Number(quantity || 0) : 0
 
@@ -287,6 +298,11 @@ export default function SalesPage() {
       minute: "2-digit",
       hour12: false,
     }).format(new Date(dateString))
+  }
+
+  const getDocumentLabel = (doc?: string | null) => {
+    if (!doc) return "Documento"
+    return /^\d{8}$/.test(doc) ? "DNI" : "Carnet de extranjería"
   }
 
   const groupedSales: GroupedSales[] = useMemo(() => {
@@ -335,12 +351,18 @@ export default function SalesPage() {
     setSelectedProduct(productId)
   }
 
-  const handleDniChange = async (value: string) => {
-    const cleanValue = value.replace(/\D/g, "").slice(0, 8)
-    setCustomerDni(cleanValue)
+  const handleDocumentChange = async (value: string) => {
+    const cleanValue =
+      customerDocumentType === "dni"
+        ? value.replace(/\D/g, "").slice(0, 8)
+        : value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 15)
 
-    if (cleanValue.length < 8) {
-      setLastDniQueried("")
+    setCustomerDocumentNumber(cleanValue)
+
+    const minLength = customerDocumentType === "dni" ? 8 : 6
+
+    if (cleanValue.length < minLength) {
+      setLastDocumentQueried("")
       setCustomerName("")
       setCustomerDepartment("")
       setCustomerProvince("")
@@ -349,16 +371,18 @@ export default function SalesPage() {
       return
     }
 
-    if (cleanValue === lastDniQueried) return
+    if (cleanValue === lastDocumentQueried) return
 
     try {
       setDniLoading(true)
 
-      const res = await fetch(`/api/dni?numero=${cleanValue}`)
+      const res = await fetch(
+        `/api/dni?tipo=${customerDocumentType}&numero=${cleanValue}`
+      )
       const data = await res.json()
 
       if (!res.ok || !data?.success) {
-        showToast(data?.error || "No se pudo consultar el DNI")
+        showToast(data?.error || "No se pudo consultar el documento")
         return
       }
 
@@ -379,10 +403,10 @@ export default function SalesPage() {
           data.data?.direccion ||
           ""
       )
-      setLastDniQueried(cleanValue)
+      setLastDocumentQueried(cleanValue)
     } catch (error) {
       console.error(error)
-      showToast("Error al consultar el DNI")
+      showToast("Error al consultar el documento")
     } finally {
       setDniLoading(false)
     }
@@ -468,7 +492,7 @@ export default function SalesPage() {
           })),
           customer_name: customerName,
           customer_phone: customerPhone,
-          customer_dni: customerDni,
+          customer_dni: customerDocumentNumber,
           customer_department: customerDepartment,
           customer_province: customerProvince,
           customer_district: customerDistrict,
@@ -492,12 +516,13 @@ export default function SalesPage() {
       setQuantity("1")
       setCustomerName("")
       setCustomerPhone("")
-      setCustomerDni("")
+      setCustomerDocumentType("dni")
+      setCustomerDocumentNumber("")
       setCustomerDepartment("")
       setCustomerProvince("")
       setCustomerDistrict("")
       setCustomerAddress("")
-      setLastDniQueried("")
+      setLastDocumentQueried("")
       setPaymentMethod("efectivo")
       setPaymentDetail("")
 
@@ -556,7 +581,7 @@ export default function SalesPage() {
       .map(
         (item) => `
           <tr>
-            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb;">
               <div style="font-weight:700; color:#0f172a;">${item.products?.name || "Producto"}</div>
               ${
                 item.products?.serial_code
@@ -564,9 +589,9 @@ export default function SalesPage() {
                   : ""
               }
             </td>
-            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:center; color:#0f172a;">${item.quantity}</td>
-            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:right; color:#0f172a;">S/ ${Number(item.price).toFixed(2)}</td>
-            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:right; font-weight:800; color:#0f172a;">S/ ${Number(item.subtotal).toFixed(2)}</td>
+            <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; text-align:center; color:#0f172a;">${item.quantity}</td>
+            <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; text-align:right; color:#0f172a;">S/ ${Number(item.price).toFixed(2)}</td>
+            <td style="padding: 12px 0; border-bottom: 1px solid #e5e7eb; text-align:right; font-weight:800; color:#0f172a;">S/ ${Number(item.subtotal).toFixed(2)}</td>
           </tr>
         `
       )
@@ -580,6 +605,12 @@ export default function SalesPage() {
       .filter(Boolean)
       .join(" - ")
 
+    const documentLabel = getDocumentLabel(sale.customer_dni)
+    const totalUnits = (sale.sale_items || []).reduce(
+      (acc, item) => acc + Number(item.quantity || 0),
+      0
+    )
+
     receiptWindow.document.write(`
       <html>
         <head>
@@ -589,21 +620,37 @@ export default function SalesPage() {
             body {
               margin: 0;
               font-family: Arial, sans-serif;
-              background: #e8eefc;
+              background: #eef2ff;
               color: #111827;
             }
+            .wrap {
+              max-width: 960px;
+              margin: 18px auto;
+              padding: 0 14px;
+            }
+            .actions {
+              text-align: right;
+              margin-bottom: 14px;
+            }
+            .btn {
+              background: #0f172a;
+              color: white;
+              border: 0;
+              padding: 12px 18px;
+              border-radius: 12px;
+              font-weight: 700;
+              cursor: pointer;
+            }
             .page {
-              max-width: 920px;
-              margin: 28px auto;
-              background: #ffffff;
+              background: white;
               border-radius: 30px;
               overflow: hidden;
-              box-shadow: 0 28px 90px rgba(15, 23, 42, 0.18);
+              box-shadow: 0 28px 90px rgba(15, 23, 42, 0.16);
             }
             .header {
               background: linear-gradient(135deg, #020617, #0f172a, #1d4ed8, #7c3aed);
               color: white;
-              padding: 42px 46px;
+              padding: 34px 38px 30px;
               position: relative;
             }
             .header::after {
@@ -614,22 +661,22 @@ export default function SalesPage() {
               pointer-events: none;
             }
             .header-top {
+              position: relative;
+              z-index: 1;
               display: flex;
               justify-content: space-between;
               align-items: flex-start;
               gap: 24px;
-              position: relative;
-              z-index: 1;
             }
             .store-name {
               margin: 0;
-              font-size: 34px;
+              font-size: 32px;
               font-weight: 900;
-              letter-spacing: 0.5px;
+              letter-spacing: 0.3px;
             }
             .brand-sub {
               margin-top: 8px;
-              font-size: 13px;
+              font-size: 12px;
               opacity: 0.82;
               letter-spacing: 2px;
               text-transform: uppercase;
@@ -639,7 +686,7 @@ export default function SalesPage() {
               border: 1px solid rgba(255,255,255,0.2);
               border-radius: 18px;
               padding: 12px 16px;
-              min-width: 180px;
+              min-width: 190px;
               text-align: right;
               backdrop-filter: blur(6px);
             }
@@ -647,7 +694,7 @@ export default function SalesPage() {
               font-size: 11px;
               text-transform: uppercase;
               letter-spacing: 1.8px;
-              opacity: 0.75;
+              opacity: 0.78;
             }
             .ticket-badge .code {
               margin-top: 6px;
@@ -655,75 +702,92 @@ export default function SalesPage() {
               font-weight: 800;
             }
             .content {
-              padding: 36px 42px 42px;
+              padding: 24px 34px 34px;
+            }
+            .hero {
+              display: grid;
+              grid-template-columns: 1.4fr 0.8fr;
+              gap: 18px;
+              align-items: stretch;
+              margin-top: -10px;
+            }
+            .hero-card, .hero-total {
+              border-radius: 24px;
+              border: 1px solid #e5e7eb;
+              background: #ffffff;
+              box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+            }
+            .hero-card {
+              padding: 20px 22px;
             }
             .hero-total {
-              margin-top: -22px;
-              position: relative;
-              z-index: 2;
+              padding: 20px 22px;
+              background: linear-gradient(135deg, #ecfeff, #f5f3ff);
+              border-color: #c7d2fe;
             }
-            .hero-total-card {
-              background: white;
-              border: 1px solid #dbeafe;
-              border-radius: 22px;
-              padding: 18px 22px;
-              box-shadow: 0 14px 40px rgba(59, 130, 246, 0.12);
-              display: inline-block;
-            }
-            .hero-total-label {
-              font-size: 12px;
+            .hero-label {
+              font-size: 11px;
               color: #64748b;
               text-transform: uppercase;
               letter-spacing: 1.8px;
             }
-            .hero-total-value {
-              margin-top: 6px;
-              font-size: 34px;
+            .hero-value {
+              margin-top: 10px;
+              font-size: 30px;
               font-weight: 900;
               color: #059669;
+            }
+            .hero-line {
+              display: flex;
+              justify-content: space-between;
+              gap: 10px;
+              margin-top: 10px;
+              font-size: 14px;
+              color: #475569;
             }
             .grid {
               display: grid;
               grid-template-columns: repeat(2, 1fr);
-              gap: 18px;
-              margin-top: 24px;
+              gap: 14px;
+              margin-top: 18px;
             }
             .card {
               background: #f8fafc;
               border: 1px solid #e5e7eb;
               border-radius: 18px;
-              padding: 18px 20px;
+              padding: 16px 18px;
             }
             .card-wide {
               grid-column: 1 / -1;
             }
             .label {
-              font-size: 11px;
+              font-size: 10px;
               color: #64748b;
               text-transform: uppercase;
               letter-spacing: 1.8px;
               margin-bottom: 8px;
             }
             .value {
-              font-size: 18px;
+              font-size: 17px;
               font-weight: 800;
               color: #0f172a;
+              line-height: 1.35;
             }
             .soft {
               color: #475569;
               font-weight: 600;
             }
             .section-title {
-              font-size: 17px;
+              font-size: 16px;
               font-weight: 900;
-              margin: 34px 0 16px;
+              margin: 28px 0 14px;
               color: #0f172a;
               letter-spacing: 0.2px;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 6px;
+              margin-top: 4px;
             }
             thead th {
               text-align: left;
@@ -735,23 +799,23 @@ export default function SalesPage() {
               border-bottom: 2px solid #dbeafe;
             }
             .summary {
-              margin-top: 26px;
+              margin-top: 20px;
               display: flex;
               justify-content: flex-end;
             }
             .summary-card {
-              min-width: 300px;
+              min-width: 320px;
               background: linear-gradient(135deg, #ecfeff, #f5f3ff);
               border: 1px solid #c7d2fe;
               border-radius: 22px;
-              padding: 20px 24px;
+              padding: 18px 22px;
             }
             .summary-line {
               display: flex;
               justify-content: space-between;
               align-items: center;
               margin-bottom: 8px;
-              font-size: 15px;
+              font-size: 14px;
               color: #334155;
             }
             .summary-total {
@@ -774,8 +838,8 @@ export default function SalesPage() {
               color: #0f172a;
             }
             .footer {
-              margin-top: 34px;
-              padding-top: 20px;
+              margin-top: 26px;
+              padding-top: 18px;
               border-top: 1px solid #e5e7eb;
               display: flex;
               justify-content: space-between;
@@ -788,26 +852,15 @@ export default function SalesPage() {
               letter-spacing: 2px;
               text-transform: uppercase;
             }
-            .print-actions {
-              text-align: right;
-              margin: 20px auto 0;
-              max-width: 920px;
-            }
-            .btn {
-              background: #0f172a;
-              color: white;
-              border: 0;
-              padding: 12px 18px;
-              border-radius: 12px;
-              font-weight: 700;
-              cursor: pointer;
+            .watermark {
+              font-size: 11px;
+              opacity: 0.8;
             }
             @media print {
               body { background: white; }
+              .wrap { max-width: 100%; margin: 0; padding: 0; }
               .page {
                 box-shadow: none;
-                margin: 0;
-                max-width: 100%;
                 border-radius: 0;
               }
               .print-hide { display: none; }
@@ -815,112 +868,120 @@ export default function SalesPage() {
           </style>
         </head>
         <body>
-          <div class="print-actions print-hide">
-            <button class="btn" onclick="window.print()">Imprimir comprobante</button>
-          </div>
-
-          <div class="page">
-            <div class="header">
-              <div class="header-top">
-                <div>
-                  <h1 class="store-name">${businessName || "Mi Tienda"}</h1>
-                  <div class="brand-sub">Comprobante Premium · Mahu Plexus</div>
-                </div>
-
-                <div class="ticket-badge">
-                  <div class="mini">Comprobante</div>
-                  <div class="code">#${sale.id.slice(0, 8).toUpperCase()}</div>
-                </div>
-              </div>
+          <div class="wrap">
+            <div class="actions print-hide">
+              <button class="btn" onclick="window.print()">Imprimir comprobante</button>
             </div>
 
-            <div class="content">
-              <div class="hero-total">
-                <div class="hero-total-card">
-                  <div class="hero-total-label">Total de la venta</div>
-                  <div class="hero-total-value">S/ ${Number(sale.total).toFixed(2)}</div>
-                </div>
-              </div>
-
-              <div class="grid">
-                <div class="card">
-                  <div class="label">Fecha y hora</div>
-                  <div class="value">${formatFullDateTime(sale.created_at)}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">Método de pago</div>
-                  <div class="value" style="text-transform: capitalize;">${sale.payment_method || "efectivo"}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">Cliente</div>
-                  <div class="value">${sale.customer_name || "Cliente general"}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">Teléfono</div>
-                  <div class="value">${sale.customer_phone || "-"}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">DNI</div>
-                  <div class="value">${sale.customer_dni || "-"}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">Ubicación</div>
-                  <div class="value">${locationHtml || "-"}</div>
-                </div>
-
-                <div class="card card-wide">
-                  <div class="label">Dirección</div>
-                  <div class="value soft">${sale.customer_address || "-"}</div>
-                </div>
-
-                <div class="card card-wide">
-                  <div class="label">Detalle de pago</div>
-                  <div class="value soft">${sale.payment_detail || "Sin detalle adicional"}</div>
-                </div>
-              </div>
-
-              <div class="section-title">Detalle de productos</div>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>Producto</th>
-                    <th style="text-align:center;">Cantidad</th>
-                    <th style="text-align:right;">Precio</th>
-                    <th style="text-align:right;">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${itemsHtml}
-                </tbody>
-              </table>
-
-              <div class="summary">
-                <div class="summary-card">
-                  <div class="summary-line">
-                    <span>Productos</span>
-                    <span>${(sale.sale_items || []).length}</span>
-                  </div>
-                  <div class="summary-line">
-                    <span>Unidades</span>
-                    <span>${(sale.sale_items || []).reduce((acc, item) => acc + Number(item.quantity || 0), 0)}</span>
+            <div class="page">
+              <div class="header">
+                <div class="header-top">
+                  <div>
+                    <h1 class="store-name">${businessName || "Mi Tienda"}</h1>
+                    <div class="brand-sub">Comprobante Premium · Mahu Plexus</div>
                   </div>
 
-                  <div class="summary-total">
-                    <span>Total final</span>
-                    <span>S/ ${Number(sale.total).toFixed(2)}</span>
+                  <div class="ticket-badge">
+                    <div class="mini">Comprobante</div>
+                    <div class="code">#${sale.id.slice(0, 8).toUpperCase()}</div>
                   </div>
                 </div>
               </div>
 
-              <div class="footer">
-                <div class="signature">Powered by Mahu Plexus</div>
-                <div>Gracias por su compra</div>
+              <div class="content">
+                <div class="hero">
+                  <div class="hero-card">
+                    <div class="hero-label">Resumen rápido</div>
+                    <div class="hero-line">
+                      <span>Fecha</span>
+                      <strong>${formatFullDateTime(sale.created_at)}</strong>
+                    </div>
+                    <div class="hero-line">
+                      <span>Cliente</span>
+                      <strong>${sale.customer_name || "Cliente general"}</strong>
+                    </div>
+                    <div class="hero-line">
+                      <span>Método</span>
+                      <strong style="text-transform: capitalize;">${sale.payment_method || "efectivo"}</strong>
+                    </div>
+                  </div>
+
+                  <div class="hero-total">
+                    <div class="hero-label">Total de la venta</div>
+                    <div class="hero-value">S/ ${Number(sale.total).toFixed(2)}</div>
+                  </div>
+                </div>
+
+                <div class="grid">
+                  <div class="card">
+                    <div class="label">Cliente</div>
+                    <div class="value">${sale.customer_name || "Cliente general"}</div>
+                  </div>
+
+                  <div class="card">
+                    <div class="label">${documentLabel}</div>
+                    <div class="value">${sale.customer_dni || "-"}</div>
+                  </div>
+
+                  <div class="card">
+                    <div class="label">Teléfono</div>
+                    <div class="value">${sale.customer_phone || "-"}</div>
+                  </div>
+
+                  <div class="card">
+                    <div class="label">Ubicación</div>
+                    <div class="value">${locationHtml || "-"}</div>
+                  </div>
+
+                  <div class="card card-wide">
+                    <div class="label">Dirección</div>
+                    <div class="value soft">${sale.customer_address || "-"}</div>
+                  </div>
+
+                  <div class="card card-wide">
+                    <div class="label">Detalle de pago</div>
+                    <div class="value soft">${sale.payment_detail || "Sin detalle adicional"}</div>
+                  </div>
+                </div>
+
+                <div class="section-title">Detalle de productos</div>
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th style="text-align:center;">Cantidad</th>
+                      <th style="text-align:right;">Precio</th>
+                      <th style="text-align:right;">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${itemsHtml}
+                  </tbody>
+                </table>
+
+                <div class="summary">
+                  <div class="summary-card">
+                    <div class="summary-line">
+                      <span>Productos</span>
+                      <span>${(sale.sale_items || []).length}</span>
+                    </div>
+                    <div class="summary-line">
+                      <span>Unidades</span>
+                      <span>${totalUnits}</span>
+                    </div>
+
+                    <div class="summary-total">
+                      <span>Total final</span>
+                      <span>S/ ${Number(sale.total).toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="footer">
+                  <div class="signature">Powered by Mahu Plexus</div>
+                  <div class="watermark">Gracias por su compra</div>
+                </div>
               </div>
             </div>
           </div>
@@ -1101,13 +1162,26 @@ export default function SalesPage() {
               className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
+            <select
+              value={customerDocumentType}
+              onChange={(e) => setCustomerDocumentType(e.target.value as "dni" | "cee")}
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
+            >
+              <option value="dni">DNI</option>
+              <option value="cee">Carnet de extranjería</option>
+            </select>
+
             <div className="relative">
               <input
-                value={customerDni}
-                onChange={(e) => handleDniChange(e.target.value)}
-                placeholder="DNI"
-                maxLength={8}
-                className={`w-full rounded-2xl border p-4 pr-12 outline-none ${inputClass}`}
+                value={customerDocumentNumber}
+                onChange={(e) => handleDocumentChange(e.target.value)}
+                placeholder={
+                  customerDocumentType === "dni"
+                    ? "DNI"
+                    : "Carnet de extranjería"
+                }
+                maxLength={customerDocumentType === "dni" ? 8 : 15}
+                className={`w-full rounded-2xl border p-4 pr-20 outline-none ${inputClass}`}
               />
               {dniLoading && (
                 <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cyan-300">
@@ -1115,19 +1189,6 @@ export default function SalesPage() {
                 </span>
               )}
             </div>
-
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value)}
-              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
-            >
-              <option value="efectivo">Efectivo</option>
-              <option value="yape">Yape</option>
-              <option value="plin">Plin</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="tarjeta">Tarjeta</option>
-              <option value="mixto">Mixto</option>
-            </select>
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1441,7 +1502,9 @@ export default function SalesPage() {
                           </div>
 
                           <div>
-                            <p className={`text-sm ${softTextClass}`}>Teléfono / DNI</p>
+                            <p className={`text-sm ${softTextClass}`}>
+                              Teléfono / {getDocumentLabel(sale.customer_dni)}
+                            </p>
                             <p className={`mt-1 font-medium ${titleTextClass}`}>
                               {sale.customer_phone || "-"} {sale.customer_dni ? `· ${sale.customer_dni}` : ""}
                             </p>
