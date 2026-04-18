@@ -40,6 +40,10 @@ type Sale = {
   customer_name?: string | null
   customer_phone?: string | null
   customer_dni?: string | null
+  customer_department?: string | null
+  customer_province?: string | null
+  customer_district?: string | null
+  customer_address?: string | null
   payment_method?: string | null
   payment_detail?: string | null
   created_at: string
@@ -59,8 +63,10 @@ export default function SalesPage() {
   const router = useRouter()
 
   const [businessId, setBusinessId] = useState<string | null>(null)
+  const [businessName, setBusinessName] = useState("Mi Tienda")
   const [products, setProducts] = useState<Product[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  const [isDark, setIsDark] = useState(true)
 
   const [serialSearch, setSerialSearch] = useState("")
   const [selectedProduct, setSelectedProduct] = useState("")
@@ -70,6 +76,13 @@ export default function SalesPage() {
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
   const [customerDni, setCustomerDni] = useState("")
+  const [customerDepartment, setCustomerDepartment] = useState("")
+  const [customerProvince, setCustomerProvince] = useState("")
+  const [customerDistrict, setCustomerDistrict] = useState("")
+  const [customerAddress, setCustomerAddress] = useState("")
+  const [dniLoading, setDniLoading] = useState(false)
+  const [lastDniQueried, setLastDniQueried] = useState("")
+
   const [paymentMethod, setPaymentMethod] = useState("efectivo")
   const [paymentDetail, setPaymentDetail] = useState("")
 
@@ -85,6 +98,44 @@ export default function SalesPage() {
   const showToast = (message: string) => {
     setToast(message)
     setTimeout(() => setToast(""), 2500)
+  }
+
+  useEffect(() => {
+    const savedTheme =
+      typeof window !== "undefined" ? localStorage.getItem("theme") : null
+
+    const dark =
+      savedTheme === "light"
+        ? false
+        : savedTheme === "dark"
+          ? true
+          : typeof document !== "undefined"
+            ? document.documentElement.classList.contains("dark")
+            : true
+
+    setIsDark(dark)
+
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", dark)
+      document.documentElement.classList.toggle("light", !dark)
+    }
+  }, [])
+
+  const toggleTheme = () => {
+    setIsDark((prev) => {
+      const next = !prev
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("theme", next ? "dark" : "light")
+      }
+
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.toggle("dark", next)
+        document.documentElement.classList.toggle("light", !next)
+      }
+
+      return next
+    })
   }
 
   useEffect(() => {
@@ -113,6 +164,7 @@ export default function SalesPage() {
       setBusinessId(data?.business_id || null)
 
       if (data?.business_id) {
+        await loadBusinessName(data.business_id)
         await loadProducts(data.business_id)
         await loadSales(data.business_id)
       }
@@ -120,6 +172,22 @@ export default function SalesPage() {
 
     load()
   }, [router])
+
+  const loadBusinessName = async (business_id: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("businesses")
+        .select("name")
+        .eq("id", business_id)
+        .single()
+
+      if (!error && data?.name) {
+        setBusinessName(data.name)
+      }
+    } catch (error) {
+      console.error(error)
+    }
+  }
 
   const loadProducts = async (business_id: string) => {
     try {
@@ -267,6 +335,59 @@ export default function SalesPage() {
     setSelectedProduct(productId)
   }
 
+  const handleDniChange = async (value: string) => {
+    const cleanValue = value.replace(/\D/g, "").slice(0, 8)
+    setCustomerDni(cleanValue)
+
+    if (cleanValue.length < 8) {
+      setLastDniQueried("")
+      setCustomerName("")
+      setCustomerDepartment("")
+      setCustomerProvince("")
+      setCustomerDistrict("")
+      setCustomerAddress("")
+      return
+    }
+
+    if (cleanValue === lastDniQueried) return
+
+    try {
+      setDniLoading(true)
+
+      const res = await fetch(`/api/dni?numero=${cleanValue}`)
+      const data = await res.json()
+
+      if (!res.ok || !data?.success) {
+        showToast(data?.error || "No se pudo consultar el DNI")
+        return
+      }
+
+      const nombres = data.data?.nombres || ""
+      const apellidoPaterno = data.data?.apellido_paterno || ""
+      const apellidoMaterno = data.data?.apellido_materno || ""
+
+      const fullName =
+        data.data?.nombre_completo ||
+        `${nombres} ${apellidoPaterno} ${apellidoMaterno}`.replace(/\s+/g, " ").trim()
+
+      setCustomerName(fullName)
+      setCustomerDepartment(data.data?.departamento || "")
+      setCustomerProvince(data.data?.provincia || "")
+      setCustomerDistrict(data.data?.distrito || "")
+      setCustomerAddress(
+        data.data?.direccion_completa ||
+          data.data?.direccion ||
+          ""
+      )
+      setLastDniQueried(cleanValue)
+    } catch (error) {
+      console.error(error)
+      showToast("Error al consultar el DNI")
+    } finally {
+      setDniLoading(false)
+    }
+  }
+
   const handleAddToCart = () => {
     if (!currentProduct) {
       showToast("Selecciona un producto")
@@ -348,6 +469,10 @@ export default function SalesPage() {
           customer_name: customerName,
           customer_phone: customerPhone,
           customer_dni: customerDni,
+          customer_department: customerDepartment,
+          customer_province: customerProvince,
+          customer_district: customerDistrict,
+          customer_address: customerAddress,
           payment_method: paymentMethod,
           payment_detail: paymentDetail,
         }),
@@ -368,6 +493,11 @@ export default function SalesPage() {
       setCustomerName("")
       setCustomerPhone("")
       setCustomerDni("")
+      setCustomerDepartment("")
+      setCustomerProvince("")
+      setCustomerDistrict("")
+      setCustomerAddress("")
+      setLastDniQueried("")
       setPaymentMethod("efectivo")
       setPaymentDetail("")
 
@@ -415,7 +545,7 @@ export default function SalesPage() {
   }
 
   const handlePrintReceipt = (sale: Sale) => {
-    const receiptWindow = window.open("", "_blank", "width=900,height=1000")
+    const receiptWindow = window.open("", "_blank", "width=960,height=1100")
 
     if (!receiptWindow) {
       showToast("No se pudo abrir el comprobante")
@@ -426,21 +556,29 @@ export default function SalesPage() {
       .map(
         (item) => `
           <tr>
-            <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
-              ${item.products?.name || "Producto"}
+            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb;">
+              <div style="font-weight:700; color:#0f172a;">${item.products?.name || "Producto"}</div>
               ${
                 item.products?.serial_code
-                  ? `<div style="font-size:12px; color:#6b7280; margin-top:4px;">Serie: ${item.products.serial_code}</div>`
+                  ? `<div style="font-size:12px; color:#64748b; margin-top:4px;">Serie: ${item.products.serial_code}</div>`
                   : ""
               }
             </td>
-            <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb; text-align:center;">${item.quantity}</td>
-            <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb; text-align:right;">S/ ${Number(item.price).toFixed(2)}</td>
-            <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb; text-align:right; font-weight:700;">S/ ${Number(item.subtotal).toFixed(2)}</td>
+            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:center; color:#0f172a;">${item.quantity}</td>
+            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:right; color:#0f172a;">S/ ${Number(item.price).toFixed(2)}</td>
+            <td style="padding: 14px 0; border-bottom: 1px solid #e5e7eb; text-align:right; font-weight:800; color:#0f172a;">S/ ${Number(item.subtotal).toFixed(2)}</td>
           </tr>
         `
       )
       .join("")
+
+    const locationHtml = [
+      sale.customer_department,
+      sale.customer_province,
+      sale.customer_district,
+    ]
+      .filter(Boolean)
+      .join(" - ")
 
     receiptWindow.document.write(`
       <html>
@@ -451,43 +589,104 @@ export default function SalesPage() {
             body {
               margin: 0;
               font-family: Arial, sans-serif;
-              background: #eef2ff;
+              background: #e8eefc;
               color: #111827;
             }
             .page {
-              max-width: 850px;
-              margin: 30px auto;
-              background: white;
-              border-radius: 24px;
+              max-width: 920px;
+              margin: 28px auto;
+              background: #ffffff;
+              border-radius: 30px;
               overflow: hidden;
-              box-shadow: 0 25px 80px rgba(0,0,0,0.18);
+              box-shadow: 0 28px 90px rgba(15, 23, 42, 0.18);
             }
             .header {
-              background: linear-gradient(135deg, #0f172a, #1d4ed8, #7c3aed);
+              background: linear-gradient(135deg, #020617, #0f172a, #1d4ed8, #7c3aed);
               color: white;
-              padding: 38px 42px;
+              padding: 42px 46px;
+              position: relative;
             }
-            .brand {
-              font-size: 30px;
-              font-weight: 800;
-              letter-spacing: 1px;
+            .header::after {
+              content: "";
+              position: absolute;
+              inset: 0;
+              background: radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 35%);
+              pointer-events: none;
+            }
+            .header-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 24px;
+              position: relative;
+              z-index: 1;
+            }
+            .store-name {
               margin: 0;
+              font-size: 34px;
+              font-weight: 900;
+              letter-spacing: 0.5px;
             }
-            .subtitle {
+            .brand-sub {
               margin-top: 8px;
-              opacity: 0.82;
               font-size: 13px;
+              opacity: 0.82;
               letter-spacing: 2px;
               text-transform: uppercase;
             }
+            .ticket-badge {
+              background: rgba(255,255,255,0.12);
+              border: 1px solid rgba(255,255,255,0.2);
+              border-radius: 18px;
+              padding: 12px 16px;
+              min-width: 180px;
+              text-align: right;
+              backdrop-filter: blur(6px);
+            }
+            .ticket-badge .mini {
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 1.8px;
+              opacity: 0.75;
+            }
+            .ticket-badge .code {
+              margin-top: 6px;
+              font-size: 19px;
+              font-weight: 800;
+            }
             .content {
-              padding: 34px 42px 42px;
+              padding: 36px 42px 42px;
+            }
+            .hero-total {
+              margin-top: -22px;
+              position: relative;
+              z-index: 2;
+            }
+            .hero-total-card {
+              background: white;
+              border: 1px solid #dbeafe;
+              border-radius: 22px;
+              padding: 18px 22px;
+              box-shadow: 0 14px 40px rgba(59, 130, 246, 0.12);
+              display: inline-block;
+            }
+            .hero-total-label {
+              font-size: 12px;
+              color: #64748b;
+              text-transform: uppercase;
+              letter-spacing: 1.8px;
+            }
+            .hero-total-value {
+              margin-top: 6px;
+              font-size: 34px;
+              font-weight: 900;
+              color: #059669;
             }
             .grid {
               display: grid;
               grid-template-columns: repeat(2, 1fr);
               gap: 18px;
-              margin-bottom: 28px;
+              margin-top: 24px;
             }
             .card {
               background: #f8fafc;
@@ -495,60 +694,113 @@ export default function SalesPage() {
               border-radius: 18px;
               padding: 18px 20px;
             }
+            .card-wide {
+              grid-column: 1 / -1;
+            }
             .label {
-              font-size: 12px;
-              color: #6b7280;
+              font-size: 11px;
+              color: #64748b;
               text-transform: uppercase;
-              letter-spacing: 1.6px;
+              letter-spacing: 1.8px;
               margin-bottom: 8px;
             }
             .value {
               font-size: 18px;
-              font-weight: 700;
-              color: #111827;
+              font-weight: 800;
+              color: #0f172a;
             }
-            .value.total {
-              color: #059669;
-              font-size: 26px;
+            .soft {
+              color: #475569;
+              font-weight: 600;
+            }
+            .section-title {
+              font-size: 17px;
+              font-weight: 900;
+              margin: 34px 0 16px;
+              color: #0f172a;
+              letter-spacing: 0.2px;
             }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 8px;
+              margin-top: 6px;
             }
             thead th {
               text-align: left;
               font-size: 12px;
-              color: #6b7280;
+              color: #64748b;
               text-transform: uppercase;
-              letter-spacing: 1.4px;
-              padding-bottom: 10px;
+              letter-spacing: 1.5px;
+              padding-bottom: 12px;
               border-bottom: 2px solid #dbeafe;
             }
-            .section-title {
-              font-size: 16px;
-              font-weight: 800;
-              margin: 32px 0 14px;
+            .summary {
+              margin-top: 26px;
+              display: flex;
+              justify-content: flex-end;
+            }
+            .summary-card {
+              min-width: 300px;
+              background: linear-gradient(135deg, #ecfeff, #f5f3ff);
+              border: 1px solid #c7d2fe;
+              border-radius: 22px;
+              padding: 20px 24px;
+            }
+            .summary-line {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 8px;
+              font-size: 15px;
+              color: #334155;
+            }
+            .summary-total {
+              margin-top: 12px;
+              padding-top: 12px;
+              border-top: 1px solid #cbd5e1;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .summary-total span:first-child {
+              font-size: 13px;
+              text-transform: uppercase;
+              letter-spacing: 1.5px;
+              color: #475569;
+            }
+            .summary-total span:last-child {
+              font-size: 30px;
+              font-weight: 900;
               color: #0f172a;
             }
             .footer {
-              margin-top: 30px;
+              margin-top: 34px;
               padding-top: 20px;
               border-top: 1px solid #e5e7eb;
               display: flex;
               justify-content: space-between;
               align-items: center;
-              color: #6b7280;
+              color: #64748b;
               font-size: 12px;
             }
-            .badge {
-              display: inline-block;
-              background: #dbeafe;
-              color: #1d4ed8;
-              padding: 7px 12px;
-              border-radius: 999px;
-              font-size: 12px;
+            .signature {
+              font-weight: 800;
+              letter-spacing: 2px;
+              text-transform: uppercase;
+            }
+            .print-actions {
+              text-align: right;
+              margin: 20px auto 0;
+              max-width: 920px;
+            }
+            .btn {
+              background: #0f172a;
+              color: white;
+              border: 0;
+              padding: 12px 18px;
+              border-radius: 12px;
               font-weight: 700;
+              cursor: pointer;
             }
             @media print {
               body { background: white; }
@@ -560,34 +812,36 @@ export default function SalesPage() {
               }
               .print-hide { display: none; }
             }
-            .actions {
-              text-align: right;
-              margin: 20px auto 0;
-              max-width: 850px;
-            }
-            .btn {
-              background: #111827;
-              color: white;
-              border: 0;
-              padding: 12px 18px;
-              border-radius: 12px;
-              font-weight: 700;
-              cursor: pointer;
-            }
           </style>
         </head>
         <body>
-          <div class="actions print-hide">
+          <div class="print-actions print-hide">
             <button class="btn" onclick="window.print()">Imprimir comprobante</button>
           </div>
 
           <div class="page">
             <div class="header">
-              <h1 class="brand">Comprobante de venta</h1>
-              <div class="subtitle">Powered by Mahu Plexus</div>
+              <div class="header-top">
+                <div>
+                  <h1 class="store-name">${businessName || "Mi Tienda"}</h1>
+                  <div class="brand-sub">Comprobante Premium · Mahu Plexus</div>
+                </div>
+
+                <div class="ticket-badge">
+                  <div class="mini">Comprobante</div>
+                  <div class="code">#${sale.id.slice(0, 8).toUpperCase()}</div>
+                </div>
+              </div>
             </div>
 
             <div class="content">
+              <div class="hero-total">
+                <div class="hero-total-card">
+                  <div class="hero-total-label">Total de la venta</div>
+                  <div class="hero-total-value">S/ ${Number(sale.total).toFixed(2)}</div>
+                </div>
+              </div>
+
               <div class="grid">
                 <div class="card">
                   <div class="label">Fecha y hora</div>
@@ -595,18 +849,13 @@ export default function SalesPage() {
                 </div>
 
                 <div class="card">
-                  <div class="label">Total</div>
-                  <div class="value total">S/ ${Number(sale.total).toFixed(2)}</div>
+                  <div class="label">Método de pago</div>
+                  <div class="value" style="text-transform: capitalize;">${sale.payment_method || "efectivo"}</div>
                 </div>
 
                 <div class="card">
                   <div class="label">Cliente</div>
                   <div class="value">${sale.customer_name || "Cliente general"}</div>
-                </div>
-
-                <div class="card">
-                  <div class="label">Método de pago</div>
-                  <div class="value" style="text-transform: capitalize;">${sale.payment_method || "efectivo"}</div>
                 </div>
 
                 <div class="card">
@@ -618,11 +867,21 @@ export default function SalesPage() {
                   <div class="label">DNI</div>
                   <div class="value">${sale.customer_dni || "-"}</div>
                 </div>
-              </div>
 
-              <div class="card">
-                <div class="label">Detalle de pago</div>
-                <div class="value">${sale.payment_detail || "Sin detalle adicional"}</div>
+                <div class="card">
+                  <div class="label">Ubicación</div>
+                  <div class="value">${locationHtml || "-"}</div>
+                </div>
+
+                <div class="card card-wide">
+                  <div class="label">Dirección</div>
+                  <div class="value soft">${sale.customer_address || "-"}</div>
+                </div>
+
+                <div class="card card-wide">
+                  <div class="label">Detalle de pago</div>
+                  <div class="value soft">${sale.payment_detail || "Sin detalle adicional"}</div>
+                </div>
               </div>
 
               <div class="section-title">Detalle de productos</div>
@@ -641,9 +900,27 @@ export default function SalesPage() {
                 </tbody>
               </table>
 
+              <div class="summary">
+                <div class="summary-card">
+                  <div class="summary-line">
+                    <span>Productos</span>
+                    <span>${(sale.sale_items || []).length}</span>
+                  </div>
+                  <div class="summary-line">
+                    <span>Unidades</span>
+                    <span>${(sale.sale_items || []).reduce((acc, item) => acc + Number(item.quantity || 0), 0)}</span>
+                  </div>
+
+                  <div class="summary-total">
+                    <span>Total final</span>
+                    <span>S/ ${Number(sale.total).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
               <div class="footer">
-                <div>Powered by Mahu Plexus</div>
-                <div><span class="badge">Venta #${sale.id.slice(0, 8).toUpperCase()}</span></div>
+                <div class="signature">Powered by Mahu Plexus</div>
+                <div>Gracias por su compra</div>
               </div>
             </div>
           </div>
@@ -654,44 +931,83 @@ export default function SalesPage() {
     receiptWindow.document.close()
   }
 
+  const surfaceClass = isDark
+    ? "border-white/10 bg-white/5"
+    : "border-gray-200 bg-white shadow-sm"
+
+  const panelDarkClass = isDark
+    ? "border-white/10 bg-black/20"
+    : "border-gray-200 bg-gray-50"
+
+  const inputClass = isDark
+    ? "border-white/10 bg-black/30 text-white placeholder:text-white/30"
+    : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"
+
+  const softTextClass = isDark ? "text-white/45" : "text-gray-500"
+  const mediumTextClass = isDark ? "text-white/60" : "text-gray-600"
+  const titleTextClass = isDark ? "text-white" : "text-gray-900"
+  const dividerClass = isDark ? "bg-white/10" : "bg-gray-200"
+
   return (
-    <main className="min-h-screen bg-[#050816] text-white overflow-hidden">
+    <main
+      className={`min-h-screen overflow-hidden transition-colors duration-300 ${
+        isDark ? "bg-[#050816] text-white" : "bg-[#f6f8fc] text-gray-900"
+      }`}
+    >
       <div className="absolute inset-0">
         <div className="absolute -left-20 top-10 h-60 w-60 bg-cyan-500/20 blur-[120px]" />
         <div className="absolute bottom-0 right-0 h-72 w-72 bg-purple-500/20 blur-[140px]" />
       </div>
 
       <div className="relative z-10 mx-auto max-w-7xl px-6 py-8">
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={toggleTheme}
+            className={`flex items-center gap-3 rounded-full border px-4 py-2 text-sm font-semibold transition ${
+              isDark
+                ? "border-white/10 bg-white/10 text-white hover:bg-white/20"
+                : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+            }`}
+          >
+            <span>{isDark ? "☀️" : "🌙"}</span>
+            <span>{isDark ? "Modo claro" : "Modo oscuro"}</span>
+          </button>
+        </div>
+
         <div className="mb-8 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold text-white md:text-4xl">
+            <h1 className={`text-3xl font-semibold md:text-4xl ${titleTextClass}`}>
               Registro de ventas
             </h1>
-            <p className="mt-2 text-sm text-white/50">
+            <p className={`mt-2 text-sm ${isDark ? "text-white/50" : "text-gray-500"}`}>
               Busca por serie, agrega varios productos y genera un solo comprobante.
             </p>
           </div>
 
           <a
             href="/dashboard"
-            className="rounded-2xl border border-white/10 bg-white/10 px-5 py-3 text-sm font-medium text-white backdrop-blur-xl transition hover:bg-white/20"
+            className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
+              isDark
+                ? "border-white/10 bg-white/10 text-white hover:bg-white/20"
+                : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+            }`}
           >
             Volver al panel
           </a>
         </div>
 
         <div className="mb-8 grid gap-4 md:grid-cols-3">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <p className="text-xs uppercase tracking-[0.25em] text-white/45">
+          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
+            <p className={`text-xs uppercase tracking-[0.25em] ${softTextClass}`}>
               Ventas de hoy
             </p>
-            <p className="mt-3 text-3xl font-semibold text-white">
+            <p className={`mt-3 text-3xl font-semibold ${titleTextClass}`}>
               {cantidadVentasHoy}
             </p>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <p className="text-xs uppercase tracking-[0.25em] text-white/45">
+          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
+            <p className={`text-xs uppercase tracking-[0.25em] ${softTextClass}`}>
               Unidades vendidas
             </p>
             <p className="mt-3 text-3xl font-semibold text-cyan-300">
@@ -699,8 +1015,8 @@ export default function SalesPage() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <p className="text-xs uppercase tracking-[0.25em] text-white/45">
+          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
+            <p className={`text-xs uppercase tracking-[0.25em] ${softTextClass}`}>
               Total vendido hoy
             </p>
             <p className="mt-3 text-3xl font-semibold text-green-400">
@@ -709,12 +1025,12 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+        <div className={`rounded-3xl border p-6 backdrop-blur-xl ${surfaceClass}`}>
           <div className="mb-5">
-            <h2 className="text-2xl font-semibold text-white">
+            <h2 className={`text-2xl font-semibold ${titleTextClass}`}>
               Buscar producto por serie
             </h2>
-            <p className="mt-2 text-sm text-white/45">
+            <p className={`mt-2 text-sm ${softTextClass}`}>
               Si hay una sola coincidencia, se selecciona sola automáticamente.
             </p>
           </div>
@@ -724,15 +1040,15 @@ export default function SalesPage() {
               value={serialSearch}
               onChange={(e) => setSerialSearch(e.target.value)}
               placeholder="Buscar por código de serie..."
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-              <p className="text-sm text-white/45">Producto identificado</p>
-              <p className="mt-2 text-lg font-semibold text-white">
+            <div className={`rounded-2xl border p-4 ${panelDarkClass}`}>
+              <p className={`text-sm ${softTextClass}`}>Producto identificado</p>
+              <p className={`mt-2 text-lg font-semibold ${titleTextClass}`}>
                 {currentProduct?.name || "Ninguno"}
               </p>
-              <p className="mt-1 text-sm text-white/45">
+              <p className={`mt-1 text-sm ${softTextClass}`}>
                 {currentProduct?.serial_code || "Sin serie seleccionada"}
               </p>
             </div>
@@ -747,11 +1063,13 @@ export default function SalesPage() {
                   className={`rounded-2xl border p-4 text-left transition ${
                     selectedProduct === product.id
                       ? "border-cyan-400/40 bg-cyan-400/10"
-                      : "border-white/10 bg-black/20 hover:border-cyan-400/25"
+                      : isDark
+                        ? "border-white/10 bg-black/20 hover:border-cyan-400/25"
+                        : "border-gray-200 bg-white hover:border-cyan-300"
                   }`}
                 >
-                  <p className="font-semibold text-white">{product.name}</p>
-                  <p className="mt-1 text-sm text-white/50">
+                  <p className={`font-semibold ${titleTextClass}`}>{product.name}</p>
+                  <p className={`mt-1 text-sm ${isDark ? "text-white/50" : "text-gray-500"}`}>
                     Serie: {product.serial_code || "-"} · Stock: {product.stock} · Precio: S/ {product.price}
                   </p>
                 </button>
@@ -766,34 +1084,42 @@ export default function SalesPage() {
               value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               placeholder="Cantidad"
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
             <input
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="Nombre del cliente"
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
             <input
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value)}
               placeholder="Teléfono"
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
-            <input
-              value={customerDni}
-              onChange={(e) => setCustomerDni(e.target.value)}
-              placeholder="DNI"
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
-            />
+            <div className="relative">
+              <input
+                value={customerDni}
+                onChange={(e) => handleDniChange(e.target.value)}
+                placeholder="DNI"
+                maxLength={8}
+                className={`w-full rounded-2xl border p-4 pr-12 outline-none ${inputClass}`}
+              />
+              {dniLoading && (
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-cyan-300">
+                  Buscando...
+                </span>
+              )}
+            </div>
 
             <select
               value={paymentMethod}
               onChange={(e) => setPaymentMethod(e.target.value)}
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             >
               <option value="efectivo">Efectivo</option>
               <option value="yape">Yape</option>
@@ -804,12 +1130,42 @@ export default function SalesPage() {
             </select>
           </div>
 
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <input
+              value={customerDepartment}
+              onChange={(e) => setCustomerDepartment(e.target.value)}
+              placeholder="Departamento"
+              className={`rounded-2xl border p-4 outline-none ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-white/30" : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"}`}
+            />
+
+            <input
+              value={customerProvince}
+              onChange={(e) => setCustomerProvince(e.target.value)}
+              placeholder="Provincia"
+              className={`rounded-2xl border p-4 outline-none ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-white/30" : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"}`}
+            />
+
+            <input
+              value={customerDistrict}
+              onChange={(e) => setCustomerDistrict(e.target.value)}
+              placeholder="Distrito"
+              className={`rounded-2xl border p-4 outline-none ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-white/30" : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"}`}
+            />
+
+            <input
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+              placeholder="Dirección"
+              className={`rounded-2xl border p-4 outline-none ${isDark ? "border-white/10 bg-black/20 text-white placeholder:text-white/30" : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"}`}
+            />
+          </div>
+
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <input
               value={paymentDetail}
               onChange={(e) => setPaymentDetail(e.target.value)}
               placeholder="Detalle de pago (ej: 20 efectivo + 30 transferencia)"
-              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-white outline-none placeholder:text-white/30"
+              className={`rounded-2xl border p-4 outline-none ${inputClass}`}
             />
 
             <button
@@ -821,22 +1177,22 @@ export default function SalesPage() {
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-              <p className="text-sm text-white/45">Producto elegido</p>
-              <p className="mt-2 text-xl font-semibold text-white">
+            <div className={`rounded-2xl border p-5 ${panelDarkClass}`}>
+              <p className={`text-sm ${softTextClass}`}>Producto elegido</p>
+              <p className={`mt-2 text-xl font-semibold ${titleTextClass}`}>
                 {currentProduct?.name || "Ninguno"}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-              <p className="text-sm text-white/45">Serie</p>
-              <p className="mt-2 text-lg font-semibold text-white break-all">
+            <div className={`rounded-2xl border p-5 ${panelDarkClass}`}>
+              <p className={`text-sm ${softTextClass}`}>Serie</p>
+              <p className={`mt-2 text-lg font-semibold break-all ${titleTextClass}`}>
                 {currentProduct?.serial_code || "-"}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-              <p className="text-sm text-white/45">Vista previa</p>
+            <div className={`rounded-2xl border p-5 ${panelDarkClass}`}>
+              <p className={`text-sm ${softTextClass}`}>Vista previa</p>
               <p className="mt-2 text-2xl font-bold text-green-400">
                 S/ {totalPreview.toFixed(2)}
               </p>
@@ -844,41 +1200,41 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+        <div className={`mt-10 rounded-3xl border p-6 backdrop-blur-xl ${surfaceClass}`}>
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-semibold text-white">Carrito de venta</h2>
-              <p className="mt-2 text-sm text-white/45">
+              <h2 className={`text-2xl font-semibold ${titleTextClass}`}>Carrito de venta</h2>
+              <p className={`mt-2 text-sm ${softTextClass}`}>
                 Aquí se agrupan todos los productos del cliente en un solo comprobante.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${mediumTextClass} ${panelDarkClass}`}>
               {cart.length} producto(s)
             </div>
           </div>
 
           {cart.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
-              <p className="text-lg text-white/60">Aún no hay productos en el carrito</p>
+            <div className={`rounded-2xl border border-dashed p-10 text-center ${panelDarkClass}`}>
+              <p className={`text-lg ${mediumTextClass}`}>Aún no hay productos en el carrito</p>
             </div>
           ) : (
             <div className="grid gap-4">
               {cart.map((item) => (
                 <div
                   key={item.product_id}
-                  className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between"
+                  className={`flex flex-col gap-3 rounded-2xl border p-4 md:flex-row md:items-center md:justify-between ${panelDarkClass}`}
                 >
                   <div>
-                    <p className="font-medium text-white">{item.name}</p>
-                    <p className="mt-1 text-sm text-white/45">
+                    <p className={`font-medium ${titleTextClass}`}>{item.name}</p>
+                    <p className={`mt-1 text-sm ${softTextClass}`}>
                       Serie: {item.serial_code || "-"} · Cantidad: {item.quantity} · Precio: S/ {item.price}
                     </p>
                   </div>
 
                   <div className="flex items-center gap-3">
                     <div className="text-right">
-                      <p className="text-sm text-white/45">Subtotal</p>
+                      <p className={`text-sm ${softTextClass}`}>Subtotal</p>
                       <p className="text-lg font-semibold text-cyan-300">
                         S/ {(Number(item.price) * Number(item.quantity)).toFixed(2)}
                       </p>
@@ -895,7 +1251,7 @@ export default function SalesPage() {
               ))}
 
               <div className="rounded-2xl border border-green-400/20 bg-green-400/10 p-5">
-                <p className="text-sm text-white/45">Total de la venta</p>
+                <p className={`text-sm ${softTextClass}`}>Total de la venta</p>
                 <p className="mt-2 text-3xl font-bold text-green-300">
                   S/ {cartTotal.toFixed(2)}
                 </p>
@@ -911,11 +1267,11 @@ export default function SalesPage() {
           )}
         </div>
 
-        <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+        <div className={`mt-10 rounded-3xl border p-6 backdrop-blur-xl ${surfaceClass}`}>
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <h2 className="text-2xl font-semibold text-white">Eliminar registros por mes</h2>
-              <p className="mt-2 text-sm text-white/45">
+              <h2 className={`text-2xl font-semibold ${titleTextClass}`}>Eliminar registros por mes</h2>
+              <p className={`mt-2 text-sm ${softTextClass}`}>
                 Elimina ventas antiguas por mes cuando lo necesites.
               </p>
             </div>
@@ -924,7 +1280,7 @@ export default function SalesPage() {
               <select
                 value={deleteMonth}
                 onChange={(e) => setDeleteMonth(e.target.value)}
-                className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none"
+                className={`rounded-2xl border px-4 py-3 outline-none ${inputClass}`}
               >
                 <option value="">Mes</option>
                 <option value="1">Enero</option>
@@ -945,7 +1301,7 @@ export default function SalesPage() {
                 value={deleteYear}
                 onChange={(e) => setDeleteYear(e.target.value)}
                 placeholder="Año"
-                className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-white outline-none placeholder:text-white/30"
+                className={`rounded-2xl border px-4 py-3 outline-none ${inputClass}`}
               />
 
               <button
@@ -958,15 +1314,15 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+        <div className={`mt-10 rounded-3xl border p-6 backdrop-blur-xl ${surfaceClass}`}>
           <div className="mb-5">
-            <h2 className="text-2xl font-semibold text-white">Stock actual</h2>
-            <p className="mt-2 text-sm text-white/45">Productos disponibles para venta inmediata.</p>
+            <h2 className={`text-2xl font-semibold ${titleTextClass}`}>Stock actual</h2>
+            <p className={`mt-2 text-sm ${softTextClass}`}>Productos disponibles para venta inmediata.</p>
           </div>
 
           {availableProducts.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
-              <p className="text-lg text-white/60">No hay productos con stock disponible</p>
+            <div className={`rounded-2xl border border-dashed p-10 text-center ${panelDarkClass}`}>
+              <p className={`text-lg ${mediumTextClass}`}>No hay productos con stock disponible</p>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -976,16 +1332,18 @@ export default function SalesPage() {
                   className={`rounded-3xl border p-5 transition ${
                     selectedProduct === product.id
                       ? "border-cyan-400/40 bg-cyan-400/10"
-                      : "border-white/10 bg-black/20 hover:border-cyan-400/30"
+                      : isDark
+                        ? "border-white/10 bg-black/20 hover:border-cyan-400/30"
+                        : "border-gray-200 bg-white hover:border-cyan-300"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-2xl font-semibold text-white">{product.name}</h3>
-                      <p className="mt-3 text-sm text-white/45">Precio</p>
+                      <h3 className={`text-2xl font-semibold ${titleTextClass}`}>{product.name}</h3>
+                      <p className={`mt-3 text-sm ${softTextClass}`}>Precio</p>
                       <p className="text-xl font-bold text-cyan-300">S/ {product.price}</p>
-                      <p className="mt-3 text-sm text-white/45">Serie</p>
-                      <p className="text-sm font-semibold text-white break-all">{product.serial_code || "-"}</p>
+                      <p className={`mt-3 text-sm ${softTextClass}`}>Serie</p>
+                      <p className={`text-sm font-semibold break-all ${titleTextClass}`}>{product.serial_code || "-"}</p>
                     </div>
 
                     <div className="min-w-[110px] rounded-2xl border border-green-400/20 bg-green-400/10 px-4 py-3 text-center">
@@ -996,7 +1354,11 @@ export default function SalesPage() {
 
                   <button
                     onClick={() => handlePickProduct(product.id)}
-                    className="mt-5 w-full rounded-2xl bg-white/10 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/20"
+                    className={`mt-5 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                      isDark
+                        ? "bg-white/10 text-white hover:bg-white/20"
+                        : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+                    }`}
                   >
                     Seleccionar producto
                   </button>
@@ -1006,110 +1368,137 @@ export default function SalesPage() {
           )}
         </div>
 
-        <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl">
+        <div className={`mt-10 rounded-3xl border p-6 backdrop-blur-xl ${surfaceClass}`}>
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-2xl font-semibold text-white">Historial por día</h2>
-              <p className="mt-2 text-sm text-white/45">Registro organizado por fecha con hora exacta.</p>
+              <h2 className={`text-2xl font-semibold ${titleTextClass}`}>Historial por día</h2>
+              <p className={`mt-2 text-sm ${softTextClass}`}>Registro organizado por fecha con hora exacta.</p>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+            <div className={`rounded-2xl border px-4 py-3 text-sm ${mediumTextClass} ${panelDarkClass}`}>
               {sales.length} venta(s)
             </div>
           </div>
 
           {groupedSales.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-10 text-center">
-              <p className="text-lg text-white/60">Aún no hay ventas registradas</p>
+            <div className={`rounded-2xl border border-dashed p-10 text-center ${panelDarkClass}`}>
+              <p className={`text-lg ${mediumTextClass}`}>Aún no hay ventas registradas</p>
             </div>
           ) : (
             <div className="grid gap-6">
               {groupedSales.map((group) => (
                 <div
                   key={group.dateKey}
-                  className="rounded-3xl border border-white/10 bg-black/20 p-5"
+                  className={`rounded-3xl border p-5 ${panelDarkClass}`}
                 >
                   <div className="grid gap-4 md:grid-cols-4">
                     <div>
-                      <p className="text-sm text-white/45">Fecha</p>
-                      <p className="mt-1 text-xl font-semibold text-white">{group.label}</p>
+                      <p className={`text-sm ${softTextClass}`}>Fecha</p>
+                      <p className={`mt-1 text-xl font-semibold ${titleTextClass}`}>{group.label}</p>
                     </div>
 
                     <div>
-                      <p className="text-sm text-white/45">Ventas</p>
-                      <p className="mt-1 text-2xl font-bold text-white">{group.count}</p>
+                      <p className={`text-sm ${softTextClass}`}>Ventas</p>
+                      <p className={`mt-1 text-2xl font-bold ${titleTextClass}`}>{group.count}</p>
                     </div>
 
                     <div>
-                      <p className="text-sm text-white/45">Unidades</p>
+                      <p className={`text-sm ${softTextClass}`}>Unidades</p>
                       <p className="mt-1 text-2xl font-bold text-cyan-300">{group.units}</p>
                     </div>
 
                     <div>
-                      <p className="text-sm text-white/45">Total vendido</p>
+                      <p className={`text-sm ${softTextClass}`}>Total vendido</p>
                       <p className="mt-1 text-2xl font-bold text-green-400">S/ {group.total.toFixed(2)}</p>
                     </div>
                   </div>
 
-                  <div className="mt-5 h-px w-full bg-white/10" />
+                  <div className={`mt-5 h-px w-full ${dividerClass}`} />
 
                   <div className="mt-5 grid gap-4">
                     {group.sales.map((sale) => (
                       <div
                         key={sale.id}
-                        className="rounded-2xl border border-white/10 bg-white/[0.03] p-4"
+                        className={`rounded-2xl border p-4 ${
+                          isDark
+                            ? "border-white/10 bg-white/[0.03]"
+                            : "border-gray-200 bg-white"
+                        }`}
                       >
                         <div className="grid gap-4 md:grid-cols-5">
                           <div>
-                            <p className="text-sm text-white/45">Hora</p>
-                            <p className="mt-1 font-medium text-white">
+                            <p className={`text-sm ${softTextClass}`}>Hora</p>
+                            <p className={`mt-1 font-medium ${titleTextClass}`}>
                               {formatHour(sale.created_at)}
                             </p>
                           </div>
 
                           <div>
-                            <p className="text-sm text-white/45">Cliente</p>
-                            <p className="mt-1 font-medium text-white">
+                            <p className={`text-sm ${softTextClass}`}>Cliente</p>
+                            <p className={`mt-1 font-medium ${titleTextClass}`}>
                               {sale.customer_name || "Cliente general"}
                             </p>
                           </div>
 
                           <div>
-                            <p className="text-sm text-white/45">Teléfono / DNI</p>
-                            <p className="mt-1 font-medium text-white">
+                            <p className={`text-sm ${softTextClass}`}>Teléfono / DNI</p>
+                            <p className={`mt-1 font-medium ${titleTextClass}`}>
                               {sale.customer_phone || "-"} {sale.customer_dni ? `· ${sale.customer_dni}` : ""}
                             </p>
                           </div>
 
                           <div>
-                            <p className="text-sm text-white/45">Pago</p>
-                            <p className="mt-1 font-medium capitalize text-white">
+                            <p className={`text-sm ${softTextClass}`}>Pago</p>
+                            <p className={`mt-1 font-medium capitalize ${titleTextClass}`}>
                               {sale.payment_method || "efectivo"}
                             </p>
-                            <p className="mt-1 text-xs text-white/40">
+                            <p className={`mt-1 text-xs ${isDark ? "text-white/40" : "text-gray-400"}`}>
                               {sale.payment_detail || "Sin detalle"}
                             </p>
                           </div>
 
                           <div>
-                            <p className="text-sm text-white/45">Total</p>
+                            <p className={`text-sm ${softTextClass}`}>Total</p>
                             <p className="mt-1 text-2xl font-bold text-green-400">
                               S/ {Number(sale.total).toFixed(2)}
                             </p>
                           </div>
                         </div>
 
-                        <div className="mt-4 h-px w-full bg-white/10" />
+                        {(sale.customer_department || sale.customer_province || sale.customer_district || sale.customer_address) && (
+                          <>
+                            <div className={`mt-4 h-px w-full ${dividerClass}`} />
+                            <div className="mt-4 grid gap-4 md:grid-cols-2">
+                              <div className={`rounded-2xl border p-4 ${panelDarkClass}`}>
+                                <p className={`text-sm ${softTextClass}`}>Ubicación</p>
+                                <p className={`mt-1 font-medium ${titleTextClass}`}>
+                                  {[sale.customer_department, sale.customer_province, sale.customer_district]
+                                    .filter(Boolean)
+                                    .join(" - ") || "-"}
+                                </p>
+                              </div>
+
+                              <div className={`rounded-2xl border p-4 ${panelDarkClass}`}>
+                                <p className={`text-sm ${softTextClass}`}>Dirección</p>
+                                <p className={`mt-1 font-medium ${titleTextClass}`}>
+                                  {sale.customer_address || "-"}
+                                </p>
+                              </div>
+                            </div>
+                          </>
+                        )}
+
+                        <div className={`mt-4 h-px w-full ${dividerClass}`} />
 
                         <div className="mt-4 grid gap-3">
                           {(sale.sale_items || []).map((item) => (
                             <div
                               key={item.id}
-                              className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:flex-row md:items-center md:justify-between"
+                              className={`flex flex-col gap-3 rounded-2xl border p-4 md:flex-row md:items-center md:justify-between ${panelDarkClass}`}
                             >
                               <div>
-                                <p className="font-medium text-white">{item.products?.name || "Producto"}</p>
-                                <p className="mt-1 text-sm text-white/45">
+                                <p className={`font-medium ${titleTextClass}`}>{item.products?.name || "Producto"}</p>
+                                <p className={`mt-1 text-sm ${softTextClass}`}>
                                   Cantidad: {item.quantity} · Precio: S/ {item.price}
                                   {item.products?.serial_code ? ` · Serie: ${item.products.serial_code}` : ""}
                                 </p>
@@ -1117,7 +1506,7 @@ export default function SalesPage() {
 
                               <div className="flex items-center gap-3">
                                 <div className="text-right">
-                                  <p className="text-sm text-white/45">Subtotal</p>
+                                  <p className={`text-sm ${softTextClass}`}>Subtotal</p>
                                   <p className="text-lg font-semibold text-cyan-300">
                                     S/ {Number(item.subtotal).toFixed(2)}
                                   </p>
@@ -1125,7 +1514,11 @@ export default function SalesPage() {
 
                                 <button
                                   onClick={() => handlePrintReceipt(sale)}
-                                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+                                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                                    isDark
+                                      ? "bg-white/10 text-white hover:bg-white/20"
+                                      : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+                                  }`}
                                 >
                                   Comprobante
                                 </button>
@@ -1143,14 +1536,20 @@ export default function SalesPage() {
         </div>
 
         <div className="mt-16 text-center">
-          <p className="text-xs uppercase tracking-[0.35em] text-white/25">
+          <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? "text-white/25" : "text-gray-400"}`}>
             Powered by Mahu Plexus
           </p>
         </div>
       </div>
 
       {toast && (
-        <div className="fixed bottom-6 right-6 rounded-2xl border border-white/10 bg-black/80 px-6 py-4 text-white shadow-2xl backdrop-blur-xl">
+        <div
+          className={`fixed bottom-6 right-6 rounded-2xl border px-6 py-4 shadow-2xl backdrop-blur-xl ${
+            isDark
+              ? "border-white/10 bg-black/80 text-white"
+              : "border-gray-200 bg-white text-gray-900"
+          }`}
+        >
           {toast}
         </div>
       )}
