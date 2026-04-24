@@ -10,10 +10,21 @@ type CartItemInput = {
   quantity: number
 }
 
+function buildSaleCode(id: string, createdAt: string) {
+  const date = new Date(createdAt)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `VTA-${year}${month}${day}-${id.slice(0, 4).toUpperCase()}`
+}
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
     const business_id = searchParams.get("business_id")
+    const seller_id = searchParams.get("seller_id")
+    const role = searchParams.get("role")
 
     if (!business_id) {
       return new Response(
@@ -25,11 +36,13 @@ export async function GET(req: Request) {
       )
     }
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("sales")
       .select(`
         id,
+        sale_code,
         total,
+        seller_id,
         customer_name,
         customer_phone,
         customer_dni,
@@ -55,6 +68,12 @@ export async function GET(req: Request) {
       `)
       .eq("business_id", business_id)
       .order("created_at", { ascending: false })
+
+    if (role === "seller" && seller_id) {
+      query = query.eq("seller_id", seller_id)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       return new Response(
@@ -90,6 +109,7 @@ export async function POST(req: Request) {
 
     const {
       business_id,
+      seller_id,
       product_id,
       quantity,
       items,
@@ -107,6 +127,16 @@ export async function POST(req: Request) {
     if (!business_id) {
       return new Response(
         JSON.stringify({ error: "Falta business_id" }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
+
+    if (!seller_id) {
+      return new Response(
+        JSON.stringify({ error: "Falta seller_id" }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -148,6 +178,7 @@ export async function POST(req: Request) {
       .from("products")
       .select("id, name, price, stock")
       .in("id", productIds)
+      .eq("business_id", business_id)
 
     if (productsError) {
       return new Response(
@@ -218,6 +249,7 @@ export async function POST(req: Request) {
       .insert([
         {
           business_id,
+          seller_id,
           total,
           customer_name: customer_name || null,
           customer_phone: customer_phone || null,
@@ -235,7 +267,24 @@ export async function POST(req: Request) {
 
     if (saleError || !sale) {
       return new Response(
-        JSON.stringify({ error: "No se pudo crear la venta" }),
+        JSON.stringify({ error: saleError?.message || "No se pudo crear la venta" }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
+
+    const saleCode = buildSaleCode(sale.id, sale.created_at)
+
+    const { error: codeError } = await supabase
+      .from("sales")
+      .update({ sale_code: saleCode })
+      .eq("id", sale.id)
+
+    if (codeError) {
+      return new Response(
+        JSON.stringify({ error: codeError.message || "No se pudo guardar el código de venta" }),
         {
           status: 500,
           headers: { "Content-Type": "application/json" },
@@ -291,7 +340,10 @@ export async function POST(req: Request) {
     return new Response(
       JSON.stringify({
         success: true,
-        sale,
+        sale: {
+          ...sale,
+          sale_code: saleCode,
+        },
       }),
       {
         status: 200,
