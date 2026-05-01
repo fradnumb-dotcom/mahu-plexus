@@ -18,6 +18,12 @@ type SaleItem = {
   quantity: number
   price: number
   subtotal: number
+  product_id?: string | null
+  products?: {
+    id: string
+    name: string
+    serial_code?: string | null
+  } | null
 }
 
 type Sale = {
@@ -45,6 +51,8 @@ type SellerSummary = {
 }
 
 type InventoryTab = "all" | "low" | "out"
+type InventorySort = "name" | "stock_low" | "stock_high" | "price_low" | "price_high"
+type ToastType = "create" | "update" | "edit" | "delete" | "export" | "error" | "success"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -56,8 +64,13 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("")
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [role, setRole] = useState<"owner" | "seller" | null>(null)
+  const [isLoadingSystem, setIsLoadingSystem] = useState(true)
   const [isDark, setIsDark] = useState(true)
+  const [currentTime, setCurrentTime] = useState("")
   const [inventoryTab, setInventoryTab] = useState<InventoryTab>("all")
+  const [inventorySort, setInventorySort] = useState<InventorySort>("name")
+  const [inventoryPage, setInventoryPage] = useState(1)
+  const [inventoryPageSize, setInventoryPageSize] = useState(50)
 
   const [name, setName] = useState("")
   const [price, setPrice] = useState("")
@@ -67,16 +80,20 @@ export default function DashboardPage() {
   const [editing, setEditing] = useState<Product | null>(null)
 
   const [animateKey, setAnimateKey] = useState(0)
-  const [toast, setToast] = useState("")
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
 
   const timeZone =
     typeof window !== "undefined"
       ? Intl.DateTimeFormat().resolvedOptions().timeZone
       : "UTC"
 
-  const showToast = (message: string) => {
-    setToast(message)
-    setTimeout(() => setToast(""), 2500)
+  const showToast = (message: string, type: ToastType = "success") => {
+    setToast(null)
+
+    window.setTimeout(() => {
+      setToast({ message, type })
+      window.setTimeout(() => setToast(null), 2200)
+    }, 80)
   }
 
   const getInitials = (name: string) => {
@@ -117,6 +134,24 @@ export default function DashboardPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const updateClock = () => {
+      const formatted = new Intl.DateTimeFormat("es-PE", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).format(new Date())
+
+      setCurrentTime(formatted)
+    }
+
+    updateClock()
+    const timer = window.setInterval(updateClock, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [])
+
   const toggleTheme = () => {
     setIsDark((prev) => {
       const next = !prev
@@ -136,38 +171,44 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const load = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+      try {
+        setIsLoadingSystem(true)
 
-      if (!user) {
-        router.push("/login")
-        return
-      }
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
 
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("business_id, role")
-        .eq("id", user.id)
-        .single()
+        if (!user) {
+          router.push("/login")
+          return
+        }
 
-      if (error) {
-        console.error(error)
-        showToast("No se pudo cargar el negocio")
-        return
-      }
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("business_id, role")
+          .eq("id", user.id)
+          .single()
 
-      setBusinessId(data?.business_id || null)
-      setRole((data?.role as "owner" | "seller" | null) || null)
+        if (error) {
+          console.error(error)
+          showToast("No se pudo cargar el negocio", "error")
+          return
+        }
 
-      if (data?.role === "seller") {
-        router.push("/sales")
-        return
-      }
+        setBusinessId(data?.business_id || null)
+        setRole((data?.role as "owner" | "seller" | null) || null)
 
-      if (data?.business_id) {
-        await loadProducts(data.business_id)
-        await loadSales(data.business_id)
+        if (data?.role === "seller") {
+          router.push("/sales")
+          return
+        }
+
+        if (data?.business_id) {
+          await loadProducts(data.business_id)
+          await loadSales(data.business_id)
+        }
+      } finally {
+        setTimeout(() => setIsLoadingSystem(false), 650)
       }
     }
 
@@ -180,7 +221,7 @@ export default function DashboardPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        showToast(data.error || "No se pudieron cargar los productos")
+        showToast(data.error || "No se pudieron cargar los productos", "error")
         return
       }
 
@@ -188,7 +229,7 @@ export default function DashboardPage() {
       setFiltered(data.data || [])
     } catch (error) {
       console.error(error)
-      showToast("Error al cargar productos")
+      showToast("Error al cargar productos", "error")
     }
   }
 
@@ -253,9 +294,13 @@ export default function DashboardPage() {
     setAnimateKey((prev) => prev + 1)
   }, [search, products])
 
+  useEffect(() => {
+    setInventoryPage(1)
+  }, [search, inventoryTab, inventorySort, inventoryPageSize])
+
   const handleSave = async () => {
     if (!name || !price || !stock || !businessId) {
-      showToast("Completa nombre, precio y stock")
+      showToast("Completa nombre, precio y stock", "error")
       return
     }
 
@@ -277,11 +322,11 @@ export default function DashboardPage() {
         const data = await res.json()
 
         if (!res.ok) {
-          showToast(data.error || "No se pudo actualizar")
+          showToast(data.error || "No se pudo actualizar", "error")
           return
         }
 
-        showToast("Producto actualizado correctamente")
+        showToast("Producto actualizado correctamente", "update")
       } else {
         const res = await fetch("/api/products", {
           method: "POST",
@@ -299,11 +344,11 @@ export default function DashboardPage() {
         const data = await res.json()
 
         if (!res.ok) {
-          showToast(data.error || "No se pudo crear")
+          showToast(data.error || "No se pudo crear", "error")
           return
         }
 
-        showToast("Producto creado correctamente")
+        showToast("Producto creado correctamente", "create")
       }
 
       setName("")
@@ -317,7 +362,7 @@ export default function DashboardPage() {
       await loadSales(businessId)
     } catch (error) {
       console.error(error)
-      showToast("Error de conexión")
+      showToast("Error de conexión", "error")
     }
   }
 
@@ -329,16 +374,16 @@ export default function DashboardPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        showToast(data.error || "No se pudo eliminar")
+        showToast(data.error || "No se pudo eliminar", "error")
         return
       }
 
-      showToast("Producto eliminado")
+      showToast("Producto eliminado", "delete")
       await loadProducts(businessId)
       await loadSales(businessId)
     } catch (error) {
       console.error(error)
-      showToast("Error de conexión")
+      showToast("Error de conexión", "error")
     }
   }
 
@@ -349,22 +394,328 @@ export default function DashboardPage() {
     setStock(String(p.stock))
     setSerialCode(p.serial_code || "")
     setDescription(p.description || "")
-    showToast("Editando producto")
+    showToast("Editando producto", "edit")
   }
 
-  const totalProducts = filtered.length
-  const totalStock = products.reduce((acc, item) => acc + Number(item.stock || 0), 0)
-  const totalValue = products.reduce(
-    (acc, item) => acc + Number(item.price || 0) * Number(item.stock || 0),
-    0
-  )
+  const exportInventoryToExcel = () => {
+    try {
+      const rows = [...(sortedInventoryList.length > 0 ? sortedInventoryList : products)].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      )
 
-  const lowStockProducts = products.filter(
-    (product) => Number(product.stock) > 0 && Number(product.stock) <= 5
-  )
-  const outOfStockProducts = products.filter(
-    (product) => Number(product.stock) === 0
-  )
+      if (rows.length === 0) {
+        showToast("No hay productos para exportar", "error")
+        return
+      }
+
+      const escapeHtml = (value: string | number | null | undefined) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;")
+          .replace(/\r?\n|\r/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+
+      const totalExportValue = rows.reduce(
+        (acc, product) =>
+          acc + Number(product.price || 0) * Number(product.stock || 0),
+        0
+      )
+
+      const generatedAt = new Intl.DateTimeFormat("es-PE", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date())
+
+      const tableRows = rows
+        .map((product, index) => {
+          const price = Number(product.price || 0)
+          const stockValue = Number(product.stock || 0)
+          const value = price * stockValue
+          const stockLabel =
+            stockValue === 0
+              ? "Sin stock"
+              : stockValue <= 5
+                ? "Stock bajo"
+                : "Disponible"
+
+          return `
+            <tr>
+              <td class="center">${index + 1}</td>
+              <td>${escapeHtml(product.name)}</td>
+              <td class="currency">${price.toFixed(2)}</td>
+              <td class="center">${stockValue}</td>
+              <td>${escapeHtml(stockLabel)}</td>
+              <td>${escapeHtml(product.serial_code || "-")}</td>
+              <td>${escapeHtml(product.description || "-")}</td>
+              <td class="currency">${value.toFixed(2)}</td>
+            </tr>
+          `
+        })
+        .join("")
+
+      const html = `
+        <html>
+          <head>
+            <meta charset="UTF-8" />
+            <style>
+              body {
+                font-family: Calibri, Arial, sans-serif;
+                color: #0f172a;
+              }
+
+              .title {
+                font-size: 22px;
+                font-weight: 700;
+                color: #0f172a;
+                margin-bottom: 4px;
+              }
+
+              .subtitle {
+                font-size: 12px;
+                color: #64748b;
+                margin-bottom: 16px;
+              }
+
+              .summary {
+                margin-bottom: 16px;
+                border-collapse: collapse;
+              }
+
+              .summary td {
+                border: 1px solid #cbd5e1;
+                padding: 8px 12px;
+                font-size: 12px;
+              }
+
+              .summary .label {
+                background: #e0f2fe;
+                font-weight: 700;
+                color: #075985;
+              }
+
+              table.inventory {
+                border-collapse: collapse;
+                width: 100%;
+              }
+
+              table.inventory th {
+                background: #0f172a;
+                color: #ffffff;
+                font-weight: 700;
+                text-align: left;
+                border: 1px solid #334155;
+                padding: 10px;
+                font-size: 12px;
+              }
+
+              table.inventory td {
+                border: 1px solid #cbd5e1;
+                padding: 9px;
+                font-size: 12px;
+                vertical-align: middle;
+              }
+
+              table.inventory tr:nth-child(even) td {
+                background: #f8fafc;
+              }
+
+              .center {
+                text-align: center;
+              }
+
+              .currency {
+                text-align: right;
+                mso-number-format: "\\0022S/\\0022 #,##0.00";
+              }
+            </style>
+          </head>
+          <body>
+            <div class="title">Inventario Mahu Plexus</div>
+            <div class="subtitle">Exportado el ${escapeHtml(generatedAt)}</div>
+
+            <table class="summary">
+              <tr>
+                <td class="label">Productos exportados</td>
+                <td>${rows.length}</td>
+                <td class="label">Stock total</td>
+                <td>${rows.reduce((acc, product) => acc + Number(product.stock || 0), 0)}</td>
+                <td class="label">Valor estimado</td>
+                <td>S/ ${totalExportValue.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <table class="inventory">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Producto</th>
+                  <th>Precio</th>
+                  <th>Stock</th>
+                  <th>Estado</th>
+                  <th>Código / serie</th>
+                  <th>Descripción</th>
+                  <th>Valor total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+              </tbody>
+            </table>
+          </body>
+        </html>
+      `
+
+      const blob = new Blob([html], {
+        type: "application/vnd.ms-excel;charset=utf-8;",
+      })
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const date = new Date().toISOString().slice(0, 10)
+
+      link.href = url
+      link.download = `inventario-mahu-plexus-${date}.xls`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      showToast("Inventario exportado en Excel", "export")
+    } catch (error) {
+      console.error(error)
+      showToast("No se pudo exportar el inventario", "error")
+    }
+  }
+
+  const exportSalesToExcel = () => {
+    try {
+      if (sales.length === 0) {
+        showToast("No hay ventas para exportar", "error")
+        return
+      }
+
+      const escapeHtml = (value: string | number | null | undefined) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;")
+          .replace(/\r?\n|\r/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+
+      const generatedAt = new Intl.DateTimeFormat("es-PE", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date())
+
+      const totalSalesValue = sales.reduce(
+        (acc, sale) => acc + Number(sale.total || 0),
+        0
+      )
+
+      const rows = sales
+        .map((sale, index) => {
+          const seller = sale.seller_id
+            ? sellerProfiles[sale.seller_id]?.full_name || "Vendedor"
+            : "Sin vendedor"
+
+          const date = new Intl.DateTimeFormat("es-PE", {
+            dateStyle: "short",
+            timeStyle: "short",
+          }).format(new Date(sale.created_at))
+
+          const units = (sale.sale_items || []).reduce(
+            (sum, item) => sum + Number(item.quantity || 0),
+            0
+          )
+
+          return `
+            <tr>
+              <td class="center">${index + 1}</td>
+              <td>${escapeHtml(date)}</td>
+              <td>${escapeHtml(seller)}</td>
+              <td class="center">${units}</td>
+              <td class="currency">${Number(sale.total || 0).toFixed(2)}</td>
+            </tr>
+          `
+        })
+        .join("")
+
+      const html = `
+        <html>
+          <head>
+            <meta charset="UTF-8" />
+            <style>
+              body { font-family: Calibri, Arial, sans-serif; color: #0f172a; }
+              .title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+              .subtitle { font-size: 12px; color: #64748b; margin-bottom: 16px; }
+              .summary { margin-bottom: 16px; border-collapse: collapse; }
+              .summary td { border: 1px solid #cbd5e1; padding: 8px 12px; font-size: 12px; }
+              .summary .label { background: #dcfce7; font-weight: 700; color: #166534; }
+              table.sales { border-collapse: collapse; width: 100%; }
+              table.sales th { background: #0f172a; color: #fff; border: 1px solid #334155; padding: 10px; font-size: 12px; text-align: left; }
+              table.sales td { border: 1px solid #cbd5e1; padding: 9px; font-size: 12px; }
+              table.sales tr:nth-child(even) td { background: #f8fafc; }
+              .center { text-align: center; }
+              .currency { text-align: right; mso-number-format: "\\0022S/\\0022 #,##0.00"; }
+            </style>
+          </head>
+          <body>
+            <div class="title">Reporte de ventas Mahu Plexus</div>
+            <div class="subtitle">Exportado el ${escapeHtml(generatedAt)}</div>
+
+            <table class="summary">
+              <tr>
+                <td class="label">Ventas exportadas</td>
+                <td>${sales.length}</td>
+                <td class="label">Total vendido</td>
+                <td>S/ ${totalSalesValue.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <table class="sales">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Fecha</th>
+                  <th>Vendedor</th>
+                  <th>Unidades</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </body>
+        </html>
+      `
+
+      const blob = new Blob([html], {
+        type: "application/vnd.ms-excel;charset=utf-8;",
+      })
+
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      const date = new Date().toISOString().slice(0, 10)
+
+      link.href = url
+      link.download = `ventas-mahu-plexus-${date}.xls`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+
+      showToast("Ventas exportadas en Excel", "export")
+    } catch (error) {
+      console.error(error)
+      showToast("No se pudo exportar ventas", "error")
+    }
+  }
 
   const todayKey = new Intl.DateTimeFormat("sv-SE", {
     timeZone,
@@ -388,6 +739,10 @@ export default function DashboardPage() {
     (acc, sale) => acc + Number(sale.total || 0),
     0
   )
+
+  const averageTicketToday =
+    salesToday.length > 0 ? totalToday / salesToday.length : 0
+
 
   const unitsToday = salesToday.reduce((acc, sale) => {
     const units = (sale.sale_items || []).reduce(
@@ -459,21 +814,167 @@ export default function DashboardPage() {
     return filtered
   }, [filtered, inventoryTab])
 
+  const sortedInventoryList = useMemo(() => {
+    const source = [...inventoryList]
+
+    if (inventorySort === "stock_low") {
+      return source.sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0))
+    }
+
+    if (inventorySort === "stock_high") {
+      return source.sort((a, b) => Number(b.stock || 0) - Number(a.stock || 0))
+    }
+
+    if (inventorySort === "price_low") {
+      return source.sort((a, b) => Number(a.price || 0) - Number(b.price || 0))
+    }
+
+    if (inventorySort === "price_high") {
+      return source.sort((a, b) => Number(b.price || 0) - Number(a.price || 0))
+    }
+
+    return source.sort((a, b) => a.name.localeCompare(b.name))
+  }, [inventoryList, inventorySort])
+
+  const totalInventoryPages = Math.max(
+    1,
+    Math.ceil(sortedInventoryList.length / inventoryPageSize)
+  )
+
+  const safeInventoryPage = Math.min(inventoryPage, totalInventoryPages)
+
+  const paginatedInventoryList = useMemo(() => {
+    const start = (safeInventoryPage - 1) * inventoryPageSize
+    return sortedInventoryList.slice(start, start + inventoryPageSize)
+  }, [sortedInventoryList, safeInventoryPage, inventoryPageSize])
+
+  const stockChartData = useMemo(() => {
+    const data = [...products]
+      .sort((a, b) => Number(b.stock || 0) - Number(a.stock || 0))
+      .slice(0, 6)
+      .map((product) => ({
+        id: product.id,
+        name: product.name,
+        stock: Number(product.stock || 0),
+      }))
+
+    const maxStock = Math.max(...data.map((item) => item.stock), 1)
+
+    return data.map((item) => ({
+      ...item,
+      height: Math.max(8, Math.round((item.stock / maxStock) * 100)),
+    }))
+  }, [products])
+
+  const salesTrend = useMemo(() => {
+    const days = Array.from({ length: 7 }).map((_, index) => {
+      const date = new Date()
+      date.setDate(date.getDate() - (6 - index))
+
+      const key = new Intl.DateTimeFormat("sv-SE", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date)
+
+      const label = new Intl.DateTimeFormat("es-PE", {
+        weekday: "short",
+        timeZone,
+      }).format(date).replace(".", "")
+
+      const daySales = sales.filter((sale) => {
+        const saleKey = new Intl.DateTimeFormat("sv-SE", {
+          timeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date(sale.created_at))
+
+        return saleKey === key
+      })
+
+      return {
+        key,
+        label,
+        amount: daySales.reduce((acc, sale) => acc + Number(sale.total || 0), 0),
+        count: daySales.length,
+      }
+    })
+
+    const maxAmount = Math.max(...days.map((day) => day.amount), 1)
+
+    return days.map((day) => ({
+      ...day,
+      height: Math.max(8, Math.round((day.amount / maxAmount) * 100)),
+    }))
+  }, [sales, timeZone])
+
+  const totalProducts = filtered.length
+  const totalStock = products.reduce((acc, item) => acc + Number(item.stock || 0), 0)
+  const totalValue = products.reduce(
+    (acc, item) => acc + Number(item.price || 0) * Number(item.stock || 0),
+    0
+  )
+
+  const lowStockProducts = products.filter(
+    (product) => Number(product.stock) > 0 && Number(product.stock) <= 5
+  )
+
+  const outOfStockProducts = products.filter(
+    (product) => Number(product.stock) === 0
+  )
+
+  const inventoryHealth = products.length
+    ? Math.round(((products.length - outOfStockProducts.length) / products.length) * 100)
+    : 100
+
+  const stockRiskPercent = products.length
+    ? Math.round(((lowStockProducts.length + outOfStockProducts.length) / products.length) * 100)
+    : 0
+
+  const topProductMovements = useMemo(() => {
+    const map = new Map<string, { name: string; units: number; total: number }>()
+
+    for (const sale of sales) {
+      for (const item of sale.sale_items || []) {
+        const key = item.product_id || item.products?.id || item.id
+        const productName = item.products?.name || `Producto ${String(key).slice(0, 4)}`
+        const current = map.get(key)
+
+        if (current) {
+          current.units += Number(item.quantity || 0)
+          current.total += Number(item.subtotal || 0)
+        } else {
+          map.set(key, {
+            name: productName,
+            units: Number(item.quantity || 0),
+            total: Number(item.subtotal || 0),
+          })
+        }
+      }
+    }
+
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 4)
+  }, [sales])
+
   const surfaceClass = isDark
-    ? "border-white/10 bg-white/5"
-    : "border-gray-200 bg-white shadow-sm"
+    ? "border-white/10 bg-white/[0.06] shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
+    : "border-slate-200 bg-white/90 shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
 
   const cardClass = isDark
     ? "border-white/10 bg-black/20"
-    : "border-gray-200 bg-gray-50"
+    : "border-slate-200 bg-slate-50/80"
 
   const inputClass = isDark
     ? "border-white/10 bg-black/30 text-white placeholder:text-white/30"
-    : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400"
+    : "border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
 
-  const titleTextClass = isDark ? "text-white" : "text-gray-900"
-  const softTextClass = isDark ? "text-white/45" : "text-gray-500"
-  const mediumTextClass = isDark ? "text-white/55" : "text-gray-600"
+  const titleTextClass = isDark ? "text-white" : "text-slate-950"
+  const softTextClass = isDark ? "text-white/45" : "text-slate-500"
+  const mediumTextClass = isDark ? "text-white/60" : "text-slate-600"
 
   const tabBaseClass =
     "rounded-2xl px-4 py-2.5 text-sm font-medium transition border"
@@ -485,21 +986,239 @@ export default function DashboardPage() {
   return (
     <main
       className={`min-h-screen overflow-hidden transition-colors duration-300 ${
-        isDark ? "bg-[#050816] text-white" : "bg-[#f6f8fc] text-gray-900"
+        isDark ? "bg-[#050816] text-white" : "bg-[#f3f6fb] text-slate-950"
       }`}
     >
+      <style jsx global>{`
+        @keyframes premiumEnter {
+          from {
+            opacity: 0;
+            transform: translateY(14px) scale(0.985);
+            filter: blur(6px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+
+        @keyframes premiumFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
+        }
+
+        @keyframes premiumPulse {
+          0%, 100% { opacity: 0.45; transform: scale(1); }
+          50% { opacity: 0.9; transform: scale(1.05); }
+        }
+
+        .premium-enter {
+          animation: premiumEnter 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .premium-float {
+          animation: premiumFloat 5s ease-in-out infinite;
+        }
+
+        .premium-glow {
+          animation: premiumPulse 3.6s ease-in-out infinite;
+        }
+
+        @keyframes premiumToastIn {
+          from {
+            opacity: 0;
+            transform: scale(0.94) translateY(12px);
+            filter: blur(8px);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            filter: blur(0);
+          }
+        }
+
+        @keyframes toastProgress {
+          from { width: 0%; }
+          to { width: 100%; }
+        }
+
+        @keyframes systemSpin {
+          to { transform: rotate(360deg); }
+        }
+
+        @keyframes systemGlow {
+          0%, 100% { opacity: 0.45; transform: scale(1); }
+          50% { opacity: 0.9; transform: scale(1.06); }
+        }
+
+        @keyframes premiumShimmer {
+          from { transform: translateX(-120%); }
+          to { transform: translateX(120%); }
+        }
+
+        @keyframes iconBounce {
+          0% { transform: scale(0.85) rotate(-8deg); }
+          45% { transform: scale(1.12) rotate(5deg); }
+          100% { transform: scale(1) rotate(0); }
+        }
+
+        @keyframes trashShake {
+          0%, 100% { transform: rotate(0deg); }
+          20% { transform: rotate(-10deg); }
+          40% { transform: rotate(8deg); }
+          60% { transform: rotate(-6deg); }
+          80% { transform: rotate(4deg); }
+        }
+
+        @keyframes exportLift {
+          0% { transform: translateY(5px); opacity: 0.4; }
+          60% { transform: translateY(-4px); opacity: 1; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+
+        .premium-toast-icon {
+          animation: iconBounce 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .premium-trash-icon {
+          animation: trashShake 520ms ease-in-out both;
+        }
+
+        .premium-export-icon {
+          animation: exportLift 560ms ease-out both;
+        }
+
+        .premium-toast {
+          animation: premiumToastIn 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .toast-progress {
+          animation: toastProgress 1.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+        }
+
+        .system-spin {
+          animation: systemSpin 1s linear infinite;
+        }
+
+        .system-glow {
+          animation: systemGlow 2.4s ease-in-out infinite;
+        }
+
+        .premium-shimmer {
+          animation: premiumShimmer 1.8s ease-in-out infinite;
+        }
+
+        .premium-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .premium-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(148, 163, 184, 0.32);
+          border-radius: 999px;
+        }
+      `}</style>
       <div className="absolute inset-0">
-        <div className="absolute -left-20 top-10 h-60 w-60 bg-cyan-500/20 blur-[120px]" />
-        <div className="absolute bottom-0 right-0 h-72 w-72 bg-purple-500/20 blur-[140px]" />
-        <div className="absolute inset-0 opacity-[0.05] [background-image:radial-gradient(circle_at_center,white_1px,transparent_1px)] [background-size:28px_28px]" />
+        <div className="absolute -left-28 -top-20 h-96 w-96 rounded-full bg-cyan-500/20 blur-[120px]" />
+        <div className="absolute right-0 top-20 h-96 w-96 rounded-full bg-purple-500/20 blur-[140px]" />
+        <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:48px_48px]" />
       </div>
 
-      <div className="relative z-10 mx-auto max-w-7xl px-5 py-6 md:px-6 md:py-7">
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="relative z-10 min-h-screen">
+        <aside
+          className={`fixed inset-y-0 left-0 z-40 hidden h-screen w-72 overflow-y-auto premium-scrollbar border-r px-5 py-6 backdrop-blur-2xl xl:block ${
+            isDark
+              ? "border-white/10 bg-[#050816]/92 shadow-[24px_0_90px_rgba(0,0,0,0.35)]"
+              : "border-slate-200 bg-white/92 shadow-[24px_0_70px_rgba(15,23,42,0.08)]"
+          }`}
+        >
+          <div className="premium-enter mb-8 flex items-center gap-3">
+            <div className="premium-float flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 to-purple-400 text-xl font-black text-slate-950 shadow-lg shadow-cyan-500/20">
+              M
+            </div>
+            <div>
+              <p className={`text-sm font-semibold ${titleTextClass}`}>Mahu Plexus</p>
+              <p className={`text-xs ${softTextClass}`}>Admin panel</p>
+            </div>
+          </div>
+
+          <nav className="premium-enter space-y-2" style={{ animationDelay: "80ms" }}>
+            <a
+              href="/dashboard"
+              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                isDark
+                  ? "border-cyan-400/25 bg-cyan-400/10 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.12)]"
+                  : "border-cyan-200 bg-cyan-50 text-cyan-700"
+              }`}
+            >
+              <span>▣</span>
+              Dashboard
+            </a>
+
+            <a
+              href="/sales"
+              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <span>◈</span>
+              Ventas
+            </a>
+
+            <a
+              href="/sellers"
+              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <span>◎</span>
+              Vendedores
+            </a>
+
+            <a
+              href="/settings"
+              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+            >
+              <span>⚙</span>
+              Configuración
+            </a>
+          </nav>
+
+          <div className={`mt-8 rounded-3xl border p-4 ${cardClass}`}>
+            <p className={`text-xs uppercase tracking-[0.28em] ${softTextClass}`}>Estado</p>
+            <div className="mt-4 flex items-center gap-3">
+              <span className="premium-glow h-3 w-3 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.8)]" />
+              <p className={`text-sm font-semibold ${titleTextClass}`}>Sistema activo</p>
+            </div>
+            <p className={`mt-2 text-xs leading-5 ${softTextClass}`}>
+              Ventas, inventario y vendedores operando por negocio.
+            </p>
+          </div>
+
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut()
+              router.push("/login")
+            }}
+            className={`mt-6 w-full rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+              isDark
+                ? "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Salir
+          </button>
+        </aside>
+
+        <div className="min-w-0 px-4 py-5 md:px-6 lg:px-8 xl:ml-72">
+        <div className={`premium-enter sticky top-4 z-30 mb-5 flex flex-col gap-4 rounded-[28px] border px-5 py-4 backdrop-blur-2xl md:flex-row md:items-center md:justify-between ${surfaceClass}`}>
           <div>
             <div
               className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 backdrop-blur-xl ${
-                isDark ? "border-white/10 bg-white/5" : "border-gray-200 bg-white"
+                isDark ? "border-white/10 bg-white/[0.06] shadow-[0_24px_80px_rgba(0,0,0,0.35)]" : "border-gray-200 bg-white"
               }`}
             >
               <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_14px_rgba(103,232,249,0.9)]" />
@@ -516,76 +1235,65 @@ export default function DashboardPage() {
             </div>
 
             <h1 className={`mt-4 text-3xl font-semibold md:text-4xl ${titleTextClass}`}>
-              Panel de control
+              Bienvenido a Mahu Plexus
             </h1>
             <p className={`mt-2 text-sm ${isDark ? "text-white/50" : "text-gray-500"}`}>
-              Una vista clara, elegante y rápida de tu negocio.
+              Control central de ventas, inventario y rendimiento comercial.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <div className={`hidden rounded-2xl border px-4 py-3 text-xs font-semibold md:block ${cardClass} ${mediumTextClass}`}>
+              {new Date().toLocaleDateString("es-PE")}
+            </div>
+
             <button
               onClick={toggleTheme}
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
+              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition hover:-translate-y-0.5 ${
                 isDark
                   ? "border-white/10 bg-white/10 text-white hover:bg-white/20"
-                  : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
+                  : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
               }`}
             >
               {isDark ? "☀️ Claro" : "🌙 Oscuro"}
             </button>
 
-            <a
-              href="/sales"
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
-                isDark
-                  ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-200 hover:bg-cyan-400/20"
-                  : "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
-              }`}
-            >
-              Ir a ventas
-            </a>
-
-            <a
-              href="/settings"
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
-                isDark
-                  ? "border-purple-400/20 bg-purple-400/10 text-purple-200 hover:bg-purple-400/20"
-                  : "border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100"
-              }`}
-            >
-              Configuración
-            </a>
-
-            <a
-              href="/sellers"
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
-                isDark
-                  ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-              }`}
-            >
-              Crear vendedores
-            </a>
-
-            <button
-              onClick={async () => {
-                await supabase.auth.signOut()
-                router.push("/login")
-              }}
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition ${
-                isDark
-                  ? "border-white/10 bg-white/10 text-white hover:bg-white/20"
-                  : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50"
-              }`}
-            >
-              Salir
-            </button>
+            <div className={`relative overflow-hidden rounded-2xl border px-5 py-3 text-sm font-semibold ${cardClass}`}>
+              <div className="absolute inset-0 bg-gradient-to-r from-cyan-300/10 via-purple-400/10 to-transparent" />
+              <div className="relative flex items-center gap-3">
+                <span className="premium-glow h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.75)]" />
+                <div>
+                  <p className={`text-[10px] uppercase tracking-[0.22em] ${softTextClass}`}>Hora local</p>
+                  <p className={`font-mono text-base font-bold ${titleTextClass}`}>{currentTime || "--:--:--"}</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl ${surfaceClass}`}>
+        <div className="premium-enter mb-5 grid grid-cols-2 gap-3 xl:hidden" style={{ animationDelay: "80ms" }}>
+          <a href="/sales" className={`rounded-2xl border px-4 py-3 text-center text-sm font-semibold ${cardClass}`}>
+            Ventas
+          </a>
+          <a href="/sellers" className={`rounded-2xl border px-4 py-3 text-center text-sm font-semibold ${cardClass}`}>
+            Vendedores
+          </a>
+          <a href="/settings" className={`rounded-2xl border px-4 py-3 text-center text-sm font-semibold ${cardClass}`}>
+            Configuración
+          </a>
+          <button
+            onClick={async () => {
+              await supabase.auth.signOut()
+              router.push("/login")
+            }}
+            className={`rounded-2xl border px-4 py-3 text-center text-sm font-semibold ${cardClass}`}
+          >
+            Salir
+          </button>
+        </div>
+
+        <div className="premium-enter mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4" style={{ animationDelay: "120ms" }}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Ventas de hoy
             </p>
@@ -594,14 +1302,14 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Unidades vendidas
             </p>
             <p className="mt-2 text-3xl font-semibold text-cyan-300">{unitsToday}</p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Total vendido
             </p>
@@ -610,7 +1318,7 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Productos
             </p>
@@ -618,34 +1326,149 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 xl:grid-cols-3">
+        <div className="premium-enter mb-6 grid gap-4 xl:grid-cols-3" style={{ animationDelay: "170ms" }}>
           <div className={`rounded-3xl border p-5 backdrop-blur-xl xl:col-span-2 ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>Resumen general</h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Estado actual del inventario y movimiento del negocio.
-              </p>
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h2 className={`text-xl font-semibold ${titleTextClass}`}>Resumen general</h2>
+                <p className={`mt-1 text-sm ${softTextClass}`}>
+                  Estado actual del inventario y movimiento del negocio.
+                </p>
+              </div>
+
+              <div className={`rounded-2xl border px-4 py-2 text-xs font-semibold ${cardClass} ${mediumTextClass}`}>
+                Salud inventario: {inventoryHealth}%
+              </div>
             </div>
 
             <div className="grid gap-3 md:grid-cols-3">
-              <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
                 <p className={`text-sm ${softTextClass}`}>Stock total</p>
                 <p className={`mt-2 text-2xl font-semibold ${titleTextClass}`}>{totalStock}</p>
               </div>
 
-              <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
                 <p className={`text-sm ${softTextClass}`}>Valor estimado</p>
                 <p className="mt-2 text-2xl font-semibold text-cyan-300">
                   S/ {totalValue.toFixed(2)}
                 </p>
               </div>
 
-              <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
                 <p className={`text-sm ${softTextClass}`}>Sin stock</p>
                 <p className="mt-2 text-2xl font-semibold text-red-400">
                   {outOfStockProducts.length}
                 </p>
               </div>
+
+              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 md:col-span-3 ${cardClass}`}>
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className={`text-sm ${softTextClass}`}>Ticket promedio de hoy</p>
+                    <p className="mt-2 text-2xl font-semibold text-emerald-300">
+                      S/ {averageTicketToday.toFixed(2)}
+                    </p>
+                  </div>
+
+                  <div className="h-2 overflow-hidden rounded-full bg-white/10 md:w-56">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-300"
+                      style={{ width: `${Math.min(100, averageTicketToday > 0 ? 78 : 0)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_0.8fr]">
+              <div className={`rounded-[26px] border p-4 ${cardClass}`}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className={`text-sm font-semibold ${titleTextClass}`}>Ventas últimos 7 días</p>
+                    <p className={`mt-1 text-xs ${softTextClass}`}>Gráfico real basado en ventas registradas.</p>
+                  </div>
+                  <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+                    {sales.length} venta(s)
+                  </span>
+                </div>
+
+                <div className="flex h-44 items-end gap-3 rounded-[22px] border border-white/10 bg-black/10 p-4">
+                  {salesTrend.map((day, index) => (
+                    <div
+                      key={day.key}
+                      className="group flex h-full min-w-0 flex-1 flex-col justify-end gap-2"
+                      style={{ animationDelay: `${index * 60}ms` }}
+                    >
+                      <div
+                        className="premium-enter rounded-t-2xl bg-gradient-to-t from-cyan-400 via-sky-300 to-purple-400 shadow-[0_0_26px_rgba(34,211,238,0.22)] transition duration-300 group-hover:scale-x-110"
+                        style={{ height: `${day.height}%` }}
+                        title={`S/ ${day.amount.toFixed(2)} · ${day.count} venta(s)`}
+                      />
+                      <p className={`truncate text-center text-[11px] capitalize ${softTextClass}`}>{day.label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`rounded-[26px] border p-4 ${cardClass}`}>
+                <div className="mb-3">
+                  <p className={`text-sm font-semibold ${titleTextClass}`}>Inventario visual</p>
+                  <p className={`mt-1 text-xs ${softTextClass}`}>Disponibilidad y riesgo.</p>
+                </div>
+
+                <div className="flex items-center justify-center py-2">
+                  <div
+                    className="premium-float grid h-36 w-36 place-items-center rounded-full"
+                    style={{
+                      background: `conic-gradient(rgb(34 211 238) ${inventoryHealth * 3.6}deg, rgb(248 113 113) ${inventoryHealth * 3.6}deg ${Math.max(inventoryHealth + stockRiskPercent, inventoryHealth) * 3.6}deg, rgba(148,163,184,0.22) 0deg)`,
+                    }}
+                  >
+                    <div className={`grid h-24 w-24 place-items-center rounded-full ${isDark ? "bg-[#050816]" : "bg-white"}`}>
+                      <div className="text-center">
+                        <p className={`text-2xl font-bold ${titleTextClass}`}>{inventoryHealth}%</p>
+                        <p className={`text-[11px] ${softTextClass}`}>operativo</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-2xl bg-cyan-400/10 p-3">
+                    <p className="text-lg font-bold text-cyan-300">{products.length}</p>
+                    <p className={`text-[11px] ${softTextClass}`}>productos</p>
+                  </div>
+                  <div className="rounded-2xl bg-red-400/10 p-3">
+                    <p className="text-lg font-bold text-red-300">{stockRiskPercent}%</p>
+                    <p className={`text-[11px] ${softTextClass}`}>riesgo</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={`mt-4 rounded-[26px] border p-4 ${cardClass}`}>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className={`text-sm font-semibold ${titleTextClass}`}>Stock por producto</p>
+                  <p className={`mt-1 text-xs ${softTextClass}`}>Top productos con mayor stock.</p>
+                </div>
+              </div>
+
+              {stockChartData.length === 0 ? (
+                <p className={`py-8 text-center text-sm ${softTextClass}`}>Aún no hay productos para graficar.</p>
+              ) : (
+                <div className="flex h-36 items-end gap-3">
+                  {stockChartData.map((item, index) => (
+                    <div key={item.id} className="group flex h-full min-w-0 flex-1 flex-col justify-end gap-2">
+                      <div
+                        className="premium-enter rounded-t-2xl bg-gradient-to-t from-purple-500 to-cyan-300 transition duration-300 group-hover:scale-x-110"
+                        style={{ height: `${item.height}%`, animationDelay: `${index * 70}ms` }}
+                        title={`${item.name}: ${item.stock}`}
+                      />
+                      <p className={`truncate text-center text-[11px] ${softTextClass}`}>{item.name}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -698,7 +1521,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 xl:grid-cols-2">
+        <div className="premium-enter mb-6 grid gap-4 xl:grid-cols-2" style={{ animationDelay: "220ms" }}>
           <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
@@ -1072,19 +1895,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`mb-6 rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-          <input
-            placeholder="Buscar producto o código de serie..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={`w-full rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
-          />
-
-          <p className={`mt-3 text-sm ${isDark ? "text-white/40" : "text-gray-500"}`}>
-            {filtered.length} producto(s) encontrado(s)
-          </p>
-        </div>
-
         <div className="mb-6 grid gap-4 xl:grid-cols-[1fr_1.25fr]">
           <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
             <div className="mb-4">
@@ -1192,7 +2002,81 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`mb-8 rounded-3xl border p-5 md:p-6 backdrop-blur-xl ${surfaceClass}`}>
+        <div className={`premium-enter mb-8 rounded-3xl border p-5 md:p-6 backdrop-blur-xl ${surfaceClass}`} style={{ animationDelay: "280ms" }}>
+          <div className={`mb-5 rounded-[26px] border p-4 ${cardClass}`}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className={`text-sm font-semibold ${titleTextClass}`}>Búsqueda rápida de inventario</p>
+                <p className={`mt-1 text-xs ${softTextClass}`}>
+                  Encuentra productos por nombre, descripción o código de serie.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className={`rounded-2xl border px-3 py-2 text-xs font-medium ${cardClass} ${mediumTextClass}`}>
+                  {filtered.length} encontrado(s)
+                </div>
+
+                <button
+                  onClick={exportInventoryToExcel}
+                  className={`rounded-2xl border px-4 py-2 text-xs font-bold transition hover:-translate-y-0.5 ${
+                    isDark
+                      ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200 hover:bg-emerald-300/15"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                  }`}
+                >
+                  Exportar Excel
+                </button>
+
+                <button
+                  onClick={exportSalesToExcel}
+                  className={`rounded-2xl border px-4 py-2 text-xs font-bold transition hover:-translate-y-0.5 ${
+                    isDark
+                      ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-200 hover:bg-cyan-300/15"
+                      : "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
+                  }`}
+                >
+                  Exportar ventas
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_440px]">
+              <input
+                autoFocus
+                placeholder="Buscar producto o código de serie..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={`w-full rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+              />
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <select
+                  value={inventorySort}
+                  onChange={(e) => setInventorySort(e.target.value as InventorySort)}
+                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+                >
+                  <option value="name">Orden: nombre</option>
+                  <option value="stock_low">Stock bajo primero</option>
+                  <option value="stock_high">Stock alto primero</option>
+                  <option value="price_low">Precio menor primero</option>
+                  <option value="price_high">Precio mayor primero</option>
+                </select>
+
+                <select
+                  value={inventoryPageSize}
+                  onChange={(e) => setInventoryPageSize(Number(e.target.value))}
+                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+                >
+                  <option value={25}>25 por página</option>
+                  <option value={50}>50 por página</option>
+                  <option value={100}>100 por página</option>
+                  <option value={200}>200 por página</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className={`text-xl font-semibold ${titleTextClass}`}>Inventario completo</h2>
@@ -1202,7 +2086,7 @@ export default function DashboardPage() {
             </div>
 
             <div className={`rounded-2xl border px-3 py-2 text-xs font-medium ${cardClass} ${mediumTextClass}`}>
-              {inventoryList.length} visibles
+              {sortedInventoryList.length} total
             </div>
           </div>
 
@@ -1253,7 +2137,7 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {inventoryList.length === 0 ? (
+          {sortedInventoryList.length === 0 ? (
             <div
               className={`rounded-3xl border border-dashed p-10 text-center ${
                 isDark ? "border-white/10 bg-white/[0.03]" : "border-gray-200 bg-white"
@@ -1267,8 +2151,21 @@ export default function DashboardPage() {
               </p>
             </div>
           ) : (
-            <div key={animateKey} className="grid gap-2.5">
-              {inventoryList.map((p) => (
+            <div className="overflow-hidden rounded-[26px] border border-white/10">
+              <div
+                className={`sticky top-0 z-10 hidden grid-cols-[minmax(0,1.8fr)_120px_150px_170px] gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.22em] xl:grid ${
+                  isDark ? "bg-white/[0.05] text-white/45" : "bg-slate-50 text-slate-500"
+                }`}
+              >
+                <p>Producto</p>
+                <p>Stock</p>
+                <p>Precio</p>
+                <p className="text-right">Acciones</p>
+              </div>
+
+              <div key={animateKey} className="premium-scrollbar max-h-[620px] overflow-y-auto p-2">
+                <div className="grid gap-2.5">
+                  {paginatedInventoryList.map((p) => (
                 <div
                   key={p.id}
                   className={`rounded-2xl border px-4 py-3 transition ${
@@ -1347,9 +2244,85 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                  ))}
+                </div>
+              </div>
             </div>
           )}
+
+            {sortedInventoryList.length > 0 && (
+              <div className={`mt-4 flex flex-col gap-3 rounded-2xl border p-3 md:flex-row md:items-center md:justify-between ${cardClass}`}>
+                <p className={`text-sm ${softTextClass}`}>
+                  Mostrando {Math.min((safeInventoryPage - 1) * inventoryPageSize + 1, sortedInventoryList.length)}-
+                  {Math.min(safeInventoryPage * inventoryPageSize, sortedInventoryList.length)} de {sortedInventoryList.length}
+                </p>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setInventoryPage((prev) => Math.max(1, prev - 1))}
+                    disabled={safeInventoryPage <= 1}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Anterior
+                  </button>
+
+                  <span className={`rounded-xl border px-4 py-2 text-sm font-semibold ${cardClass}`}>
+                    {safeInventoryPage} / {totalInventoryPages}
+                  </span>
+
+                  <button
+                    onClick={() => setInventoryPage((prev) => Math.min(totalInventoryPages, prev + 1))}
+                    disabled={safeInventoryPage >= totalInventoryPages}
+                    className={`rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isDark
+                        ? "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
+            )}
+        </div>
+
+        <div className={`premium-enter mb-8 rounded-3xl border p-5 md:p-6 backdrop-blur-xl ${surfaceClass}`} style={{ animationDelay: "340ms" }}>
+          <div className="mb-4">
+            <h2 className={`text-xl font-semibold ${titleTextClass}`}>Alertas inteligentes</h2>
+            <p className={`mt-1 text-sm ${softTextClass}`}>
+              Señales rápidas para tomar mejores decisiones.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <p className={`text-xs uppercase tracking-[0.2em] ${softTextClass}`}>Riesgo de stock</p>
+              <p className="mt-2 text-2xl font-bold text-red-300">{stockRiskPercent}%</p>
+              <p className={`mt-1 text-sm ${mediumTextClass}`}>
+                Productos con stock bajo o agotado.
+              </p>
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <p className={`text-xs uppercase tracking-[0.2em] ${softTextClass}`}>Movimiento</p>
+              <p className="mt-2 text-2xl font-bold text-cyan-300">{salesTodayCount}</p>
+              <p className={`mt-1 text-sm ${mediumTextClass}`}>
+                Ventas registradas hoy.
+              </p>
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${cardClass}`}>
+              <p className={`text-xs uppercase tracking-[0.2em] ${softTextClass}`}>Inventario</p>
+              <p className="mt-2 text-2xl font-bold text-emerald-300">{inventoryHealth}%</p>
+              <p className={`mt-1 text-sm ${mediumTextClass}`}>
+                Salud general del inventario.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="mt-12 text-center">
@@ -1357,17 +2330,103 @@ export default function DashboardPage() {
             Powered by Mahu Plexus
           </p>
         </div>
+        </div>
       </div>
 
       {toast && (
-        <div
-          className={`fixed bottom-6 right-6 rounded-2xl border px-6 py-4 shadow-2xl backdrop-blur-xl ${
-            isDark
-              ? "border-white/10 bg-black/80 text-white"
-              : "border-gray-200 bg-white text-gray-900"
-          }`}
-        >
-          {toast}
+        <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center px-4">
+          <div
+            className={`premium-toast relative w-full max-w-sm overflow-hidden rounded-[24px] border px-5 py-4 text-center shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl ${
+              isDark
+                ? "border-cyan-300/20 bg-[#07111f]/88 text-white"
+                : "border-cyan-200 bg-white/95 text-slate-950"
+            }`}
+          >
+            <div className="premium-shimmer absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+
+            <div
+              className={`relative mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl text-xl font-black shadow-[0_0_32px_rgba(34,211,238,0.22)] ${
+                toast.type === "delete"
+                  ? "bg-gradient-to-br from-red-400 to-orange-300 text-white premium-trash-icon"
+                  : toast.type === "edit"
+                    ? "bg-gradient-to-br from-yellow-300 to-amber-400 text-slate-950 premium-toast-icon"
+                    : toast.type === "update"
+                      ? "bg-gradient-to-br from-sky-300 to-cyan-400 text-slate-950 premium-toast-icon"
+                      : toast.type === "export"
+                        ? "bg-gradient-to-br from-emerald-300 to-cyan-300 text-slate-950 premium-export-icon"
+                        : toast.type === "error"
+                          ? "bg-gradient-to-br from-red-400 to-rose-500 text-white premium-toast-icon"
+                          : "bg-gradient-to-br from-cyan-300 to-purple-400 text-slate-950 premium-toast-icon"
+              }`}
+            >
+              {toast.type === "delete"
+                ? "🗑️"
+                : toast.type === "edit"
+                  ? "✎"
+                  : toast.type === "update"
+                    ? "↻"
+                    : toast.type === "export"
+                      ? "↓"
+                      : toast.type === "error"
+                        ? "!"
+                        : "✓"}
+            </div>
+
+            <p className={`relative text-base font-semibold ${titleTextClass}`}>{toast.message}</p>
+            <p className={`relative mt-1 text-xs ${softTextClass}`}>
+              {toast.type === "delete"
+                ? "Eliminando y sincronizando inventario."
+                : toast.type === "edit"
+                  ? "Producto listo para editar."
+                  : toast.type === "update"
+                    ? "Actualizando datos del producto."
+                    : toast.type === "export"
+                      ? "Generando archivo organizado."
+                      : toast.type === "error"
+                        ? "Revisa la acción e inténtalo nuevamente."
+                        : "Guardando cambios del sistema."}
+            </p>
+
+            <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+              <div
+                className={`toast-progress h-full rounded-full ${
+                  toast.type === "delete"
+                    ? "bg-gradient-to-r from-red-400 to-orange-300"
+                    : toast.type === "error"
+                      ? "bg-gradient-to-r from-red-400 to-rose-500"
+                      : toast.type === "export"
+                        ? "bg-gradient-to-r from-emerald-300 to-cyan-300"
+                        : "bg-gradient-to-r from-cyan-300 to-purple-400"
+                }`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isLoadingSystem && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 backdrop-blur-2xl">
+          <div
+            className={`relative w-full max-w-sm overflow-hidden rounded-[32px] border p-6 text-center shadow-[0_35px_120px_rgba(0,0,0,0.55)] ${
+              isDark
+                ? "border-cyan-300/20 bg-[#050816]/92 text-white"
+                : "border-cyan-200 bg-white/95 text-slate-950"
+            }`}
+          >
+            <div className="system-glow absolute -top-16 left-1/2 h-36 w-36 -translate-x-1/2 rounded-full bg-cyan-400/20 blur-3xl" />
+            <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-[28px] bg-gradient-to-br from-cyan-300 to-purple-400 shadow-[0_0_55px_rgba(34,211,238,0.3)]">
+              <div className="system-spin h-12 w-12 rounded-full border-4 border-slate-950/20 border-t-slate-950" />
+            </div>
+
+            <p className={`relative text-xl font-bold ${titleTextClass}`}>Cargando sistema</p>
+            <p className={`relative mt-2 text-sm ${softTextClass}`}>
+              Preparando dashboard, inventario y ventas.
+            </p>
+
+            <div className="relative mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div className="premium-shimmer h-full w-1/2 rounded-full bg-gradient-to-r from-cyan-300 to-purple-400" />
+            </div>
+          </div>
         </div>
       )}
     </main>
