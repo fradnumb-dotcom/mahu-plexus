@@ -4,6 +4,12 @@ import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "../lib/supabase"
 
+// MAHU PLEXUS CLEAN PREMIUM PALETTE
+// Dark: background #0F172A, surface #111827, card #1F2937, border #374151
+// Light: background #F9FAFB, surface #FFFFFF, border #E5E7EB
+// Accent: #3B82F6 / hover #2563EB
+// Text: #F9FAFB / #111827, secondary #D1D5DB / #374151
+
 type Product = {
   id: string
   name: string
@@ -11,6 +17,10 @@ type Product = {
   stock: number
   description?: string
   serial_code?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  created_by?: string | null
+  updated_by?: string | null
 }
 
 type SaleItem = {
@@ -52,6 +62,17 @@ type SellerSummary = {
 
 type InventoryTab = "all" | "low" | "out"
 type InventorySort = "name" | "stock_low" | "stock_high" | "price_low" | "price_high"
+type InventoryMovement = {
+  id: string
+  business_id: string
+  product_id?: string | null
+  user_id?: string | null
+  type: "created" | "updated" | "sold" | "deleted"
+  quantity?: number | null
+  note?: string | null
+  created_at: string
+}
+
 type ToastType = "create" | "update" | "edit" | "delete" | "export" | "error" | "success"
 
 export default function DashboardPage() {
@@ -61,12 +82,15 @@ export default function DashboardPage() {
   const [filtered, setFiltered] = useState<Product[]>([])
   const [sales, setSales] = useState<Sale[]>([])
   const [sellerProfiles, setSellerProfiles] = useState<Record<string, SellerProfile>>({})
+  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([])
   const [search, setSearch] = useState("")
   const [businessId, setBusinessId] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [role, setRole] = useState<"owner" | "seller" | null>(null)
   const [isLoadingSystem, setIsLoadingSystem] = useState(true)
   const [isDark, setIsDark] = useState(true)
   const [currentTime, setCurrentTime] = useState("")
+  const [isMounted, setIsMounted] = useState(false)
   const [inventoryTab, setInventoryTab] = useState<InventoryTab>("all")
   const [inventorySort, setInventorySort] = useState<InventorySort>("name")
   const [inventoryPage, setInventoryPage] = useState(1)
@@ -81,6 +105,8 @@ export default function DashboardPage() {
 
   const [animateKey, setAnimateKey] = useState(0)
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
+  const [isRefreshingMovements, setIsRefreshingMovements] = useState(false)
+  const [lastMovementRefreshAt, setLastMovementRefreshAt] = useState<string | null>(null)
 
   const timeZone =
     typeof window !== "undefined"
@@ -96,6 +122,50 @@ export default function DashboardPage() {
     }, 80)
   }
 
+  const formatMovementDate = (value: string) => {
+    if (!isMounted) return "--"
+
+    return new Intl.DateTimeFormat("es-PE", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value))
+  }
+
+  const formatHeaderDate = () => {
+    if (!isMounted) return "--"
+
+    return new Intl.DateTimeFormat("es-PE", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+    }).format(new Date())
+  }
+
+  const formatRefreshTime = (value?: string | null) => {
+    if (!isMounted || !value) return "Sin actualizar"
+
+    return new Intl.DateTimeFormat("es-PE", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(new Date(value))
+  }
+
+  const formatProductDate = (value?: string | null) => {
+    if (!isMounted || !value) return "-"
+
+    return new Intl.DateTimeFormat("es-PE", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value))
+  }
+
   const getInitials = (name: string) => {
     const cleaned = name.trim()
     if (!cleaned) return "SV"
@@ -107,13 +177,55 @@ export default function DashboardPage() {
   }
 
   const getMedal = (index: number) => {
-    if (index === 0) return "🥇"
-    if (index === 1) return "🥈"
-    if (index === 2) return "🥉"
+    if (index === 0) return "gold"
+    if (index === 1) return "silver"
+    if (index === 2) return "bronze"
     return `${index + 1}`
   }
 
+  const renderMedal = (index: number) => {
+    const medal = getMedal(index)
+
+    if (medal === "gold" || medal === "silver" || medal === "bronze") {
+      const fill =
+        medal === "gold"
+          ? "from-amber-300 to-yellow-600"
+          : medal === "silver"
+            ? "from-slate-200 to-slate-500"
+            : "from-orange-300 to-amber-700"
+
+      const ribbon =
+        medal === "gold"
+          ? "bg-amber-500/25"
+          : medal === "silver"
+            ? "bg-slate-400/25"
+            : "bg-orange-500/25"
+
+      return (
+        <span className="relative inline-grid h-9 w-9 place-items-center">
+          <span className={`absolute top-0 h-4 w-3 -rotate-12 rounded-sm ${ribbon}`} />
+          <span className={`absolute top-0 h-4 w-3 rotate-12 rounded-sm ${ribbon}`} />
+          <span className={`relative mt-2 grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br ${fill} medal-glow shadow-[0_8px_20px_rgba(0,0,0,0.28)] ring-1 ring-white/30`}>
+            <span className="h-2.5 w-2.5 rounded-full border border-white/55 bg-white/15" />
+          </span>
+        </span>
+      )
+    }
+
+    return (
+      <span className={`inline-grid h-8 w-8 place-items-center rounded-xl border text-xs font-bold ${
+        isDark
+          ? "border-white/10 bg-white/5 text-slate-300"
+          : "border-slate-200 bg-slate-50 text-slate-600"
+      }`}>
+        {medal}
+      </span>
+    )
+  }
+
   useEffect(() => {
+    setIsMounted(true)
+
     const savedTheme =
       typeof window !== "undefined" ? localStorage.getItem("theme") : null
 
@@ -183,6 +295,8 @@ export default function DashboardPage() {
           return
         }
 
+        setCurrentUserId(user.id)
+
         const { data, error } = await supabase
           .from("profiles")
           .select("business_id, role")
@@ -206,6 +320,7 @@ export default function DashboardPage() {
         if (data?.business_id) {
           await loadProducts(data.business_id)
           await loadSales(data.business_id)
+          await loadMovements(data.business_id)
         }
       } finally {
         setTimeout(() => setIsLoadingSystem(false), 650)
@@ -237,7 +352,6 @@ export default function DashboardPage() {
     const uniqueIds = Array.from(new Set(sellerIds.filter(Boolean)))
 
     if (uniqueIds.length === 0) {
-      setSellerProfiles({})
       return
     }
 
@@ -252,12 +366,15 @@ export default function DashboardPage() {
         return
       }
 
-      const map: Record<string, SellerProfile> = {}
-      ;(data || []).forEach((profile) => {
-        map[profile.id] = profile
-      })
+      setSellerProfiles((prev) => {
+        const map: Record<string, SellerProfile> = { ...prev }
 
-      setSellerProfiles(map)
+        ;(data || []).forEach((profile) => {
+          map[profile.id] = profile
+        })
+
+        return map
+      })
     } catch (error) {
       console.error(error)
     }
@@ -278,6 +395,35 @@ export default function DashboardPage() {
         .filter(Boolean) as string[]
 
       await loadSellerProfiles(sellerIds)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const loadMovements = async (business_id: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("inventory_movements")
+        .select("id, business_id, product_id, user_id, type, quantity, note, created_at")
+        .eq("business_id", business_id)
+        .order("created_at", { ascending: false })
+        .limit(12)
+
+      if (error) {
+        console.error(error)
+        return
+      }
+
+      const movements = (data || []) as InventoryMovement[]
+      setInventoryMovements(movements)
+
+      const movementUserIds = movements
+        .map((movement) => movement.user_id)
+        .filter(Boolean) as string[]
+
+      if (movementUserIds.length > 0) {
+        await loadSellerProfiles(movementUserIds)
+      }
     } catch (error) {
       console.error(error)
     }
@@ -316,6 +462,7 @@ export default function DashboardPage() {
             stock: Number(stock),
             serial_code: serialCode,
             description,
+            user_id: currentUserId,
           }),
         })
 
@@ -338,6 +485,7 @@ export default function DashboardPage() {
             serial_code: serialCode,
             description,
             business_id: businessId,
+            user_id: currentUserId,
           }),
         })
 
@@ -360,6 +508,8 @@ export default function DashboardPage() {
 
       await loadProducts(businessId)
       await loadSales(businessId)
+      await loadMovements(businessId)
+      await loadMovements(businessId)
     } catch (error) {
       console.error(error)
       showToast("Error de conexión", "error")
@@ -370,7 +520,7 @@ export default function DashboardPage() {
     if (!businessId) return
 
     try {
-      const res = await fetch(`/api/products?id=${id}`, { method: "DELETE" })
+      const res = await fetch(`/api/products?id=${id}&user_id=${currentUserId || ""}`, { method: "DELETE" })
       const data = await res.json()
 
       if (!res.ok) {
@@ -430,6 +580,17 @@ export default function DashboardPage() {
         timeStyle: "short",
       }).format(new Date())
 
+      const formatExcelDate = (value?: string | null) =>
+        value
+          ? new Intl.DateTimeFormat("es-PE", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }).format(new Date(value))
+          : "-"
+
       const tableRows = rows
         .map((product, index) => {
           const price = Number(product.price || 0)
@@ -445,12 +606,14 @@ export default function DashboardPage() {
           return `
             <tr>
               <td class="center">${index + 1}</td>
-              <td>${escapeHtml(product.name)}</td>
+              <td class="product">${escapeHtml(product.name)}</td>
               <td class="currency">${price.toFixed(2)}</td>
               <td class="center">${stockValue}</td>
               <td>${escapeHtml(stockLabel)}</td>
               <td>${escapeHtml(product.serial_code || "-")}</td>
-              <td>${escapeHtml(product.description || "-")}</td>
+              <td class="description">${escapeHtml(product.description || "-")}</td>
+              <td class="date">${escapeHtml(formatExcelDate(product.created_at || null))}</td>
+              <td class="date">${escapeHtml(formatExcelDate(product.updated_at || null))}</td>
               <td class="currency">${value.toFixed(2)}</td>
             </tr>
           `
@@ -500,6 +663,7 @@ export default function DashboardPage() {
               table.inventory {
                 border-collapse: collapse;
                 width: 100%;
+                table-layout: fixed;
               }
 
               table.inventory th {
@@ -510,6 +674,7 @@ export default function DashboardPage() {
                 border: 1px solid #334155;
                 padding: 10px;
                 font-size: 12px;
+                white-space: nowrap;
               }
 
               table.inventory td {
@@ -517,6 +682,20 @@ export default function DashboardPage() {
                 padding: 9px;
                 font-size: 12px;
                 vertical-align: middle;
+                mso-number-format:"\@";
+              }
+
+              .description {
+                width: 240px;
+              }
+
+              .date {
+                width: 135px;
+              }
+
+              .product {
+                width: 170px;
+                font-weight: 700;
               }
 
               table.inventory tr:nth-child(even) td {
@@ -558,6 +737,8 @@ export default function DashboardPage() {
                   <th>Estado</th>
                   <th>Código / serie</th>
                   <th>Descripción</th>
+                  <th>Fecha ingreso</th>
+                  <th>Última actualización</th>
                   <th>Valor total</th>
                 </tr>
               </thead>
@@ -836,6 +1017,36 @@ export default function DashboardPage() {
     return source.sort((a, b) => a.name.localeCompare(b.name))
   }, [inventoryList, inventorySort])
 
+  const salesLast7Days = useMemo(() => {
+    const days = 7
+    const result: { label: string; total: number }[] = []
+
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date()
+      date.setHours(0, 0, 0, 0)
+      date.setDate(date.getDate() - i)
+
+      const nextDate = new Date(date)
+      nextDate.setDate(nextDate.getDate() + 1)
+
+      const total = sales
+        .filter((sale) => {
+          const saleDate = new Date(sale.created_at)
+          return saleDate >= date && saleDate < nextDate
+        })
+        .reduce((acc, sale) => acc + Number(sale.total || 0), 0)
+
+      result.push({
+        label: new Intl.DateTimeFormat("es-PE", { weekday: "short" }).format(date),
+        total,
+      })
+    }
+
+    return result
+  }, [sales])
+
+  const maxSalesDay = Math.max(...salesLast7Days.map((item) => item.total), 1)
+
   const totalInventoryPages = Math.max(
     1,
     Math.ceil(sortedInventoryList.length / inventoryPageSize)
@@ -961,20 +1172,20 @@ export default function DashboardPage() {
   }, [sales])
 
   const surfaceClass = isDark
-    ? "border-white/10 bg-white/[0.06] shadow-[0_24px_80px_rgba(0,0,0,0.35)]"
-    : "border-slate-200 bg-white/90 shadow-[0_24px_70px_rgba(15,23,42,0.08)]"
+    ? "edge-glow border-white/[0.075] bg-[#111827]/78 backdrop-blur-2xl shadow-[0_28px_90px_rgba(0,0,0,0.46)]"
+    : "edge-glow border-white/80 bg-white/84 backdrop-blur-2xl shadow-[0_26px_70px_rgba(15,23,42,0.10)]"
 
   const cardClass = isDark
-    ? "border-white/10 bg-black/20"
-    : "border-slate-200 bg-slate-50/80"
+    ? "card-hover border-white/[0.075] bg-[#151D2B]/72 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.045)]"
+    : "card-hover border-slate-200/80 bg-white/88 backdrop-blur-xl shadow-[0_14px_36px_rgba(15,23,42,0.07)]"
 
   const inputClass = isDark
-    ? "border-white/10 bg-black/30 text-white placeholder:text-white/30"
-    : "border-slate-300 bg-white text-slate-900 placeholder:text-slate-400"
+    ? "border-white/[0.10] bg-[#0D1422]/88 text-[#F8FAFC] placeholder:text-slate-500 backdrop-blur-xl"
+    : "border-slate-200 bg-white/92 text-slate-950 placeholder:text-slate-400 backdrop-blur-xl"
 
-  const titleTextClass = isDark ? "text-white" : "text-slate-950"
-  const softTextClass = isDark ? "text-white/45" : "text-slate-500"
-  const mediumTextClass = isDark ? "text-white/60" : "text-slate-600"
+  const titleTextClass = isDark ? "text-[#F8FAFC]" : "text-slate-950"
+  const softTextClass = isDark ? "text-slate-400" : "text-slate-500"
+  const mediumTextClass = isDark ? "text-slate-300" : "text-slate-600"
 
   const tabBaseClass =
     "rounded-2xl px-4 py-2.5 text-sm font-medium transition border"
@@ -986,21 +1197,31 @@ export default function DashboardPage() {
   return (
     <main
       className={`min-h-screen overflow-hidden transition-colors duration-300 ${
-        isDark ? "bg-[#050816] text-white" : "bg-[#f3f6fb] text-slate-950"
+        isDark ? "bg-[#060914] text-[#F8FAFC]" : "bg-[#F6F8FC] text-slate-950"
       }`}
     >
       <style jsx global>{`
         @keyframes premiumEnter {
           from {
             opacity: 0;
-            transform: translateY(14px) scale(0.985);
-            filter: blur(6px);
+            transform: translateY(12px) scale(0.99);
+            filter: blur(5px);
           }
           to {
             opacity: 1;
             transform: translateY(0) scale(1);
             filter: blur(0);
           }
+        }
+
+        @keyframes panelAura {
+          0%, 100% { opacity: 0.42; transform: translateY(0) scale(1); }
+          50% { opacity: 0.72; transform: translateY(-4px) scale(1.02); }
+        }
+
+        @keyframes softSlide {
+          from { opacity: 0; transform: translateX(-8px); }
+          to { opacity: 1; transform: translateX(0); }
         }
 
         @keyframes premiumFloat {
@@ -1014,7 +1235,69 @@ export default function DashboardPage() {
         }
 
         .premium-enter {
-          animation: premiumEnter 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation: premiumEnter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .panel-aura {
+          animation: panelAura 6s ease-in-out infinite;
+        }
+
+        .soft-slide {
+          animation: softSlide 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .card-hover {
+          transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+            border-color 220ms ease,
+            background-color 220ms ease;
+        }
+
+        .card-hover:hover {
+          transform: translateY(-3px);
+          box-shadow: 0 20px 70px rgba(0, 0, 0, 0.22);
+        }
+
+        .medal-glow {
+          box-shadow: 0 0 22px rgba(251, 191, 36, 0.22),
+            inset 0 1px 0 rgba(255, 255, 255, 0.36);
+        }
+
+        .premium-table-row {
+          transition: background-color 160ms ease, transform 160ms ease;
+        }
+
+        .premium-table-row:hover {
+          transform: translateX(2px);
+        }
+
+        @keyframes linePulse {
+          0%, 100% { opacity: 0.45; transform: scaleX(0.92); }
+          50% { opacity: 1; transform: scaleX(1); }
+        }
+
+        .edge-glow {
+          position: relative;
+          overflow: hidden;
+        }
+
+        .edge-glow::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          padding: 1px;
+          background: linear-gradient(135deg, rgba(59,130,246,0.58), rgba(139,92,246,0.44), rgba(255,255,255,0.05));
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          opacity: 0.45;
+        }
+
+        .top-line {
+          transform-origin: center;
+          animation: linePulse 4s ease-in-out infinite;
         }
 
         .premium-float {
@@ -1041,6 +1324,17 @@ export default function DashboardPage() {
         @keyframes toastProgress {
           from { width: 0%; }
           to { width: 100%; }
+        }
+
+        @keyframes toastIconPop {
+          0% { transform: scale(0.82) rotate(-8deg); opacity: 0; }
+          55% { transform: scale(1.08) rotate(3deg); opacity: 1; }
+          100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }
+
+        @keyframes toastSlideUp {
+          from { opacity: 0; transform: translateY(12px) scale(0.96); filter: blur(8px); }
+          to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
         }
 
         @keyframes systemSpin {
@@ -1090,12 +1384,18 @@ export default function DashboardPage() {
         }
 
         .premium-toast {
-          animation: premiumToastIn 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation: toastSlideUp 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+
+        .premium-toast-icon,
+        .premium-trash-icon,
+        .premium-export-icon {
+          animation: toastIconPop 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
         .toast-progress {
-          animation: toastProgress 1.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-          box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+          animation: toastProgress 900ms linear forwards;
+          box-shadow: 0 0 14px rgba(59, 130, 246, 0.24);
         }
 
         .system-spin {
@@ -1118,9 +1418,43 @@ export default function DashboardPage() {
           background: rgba(148, 163, 184, 0.32);
           border-radius: 999px;
         }
+
+        @keyframes metricPulse {
+          0%, 100% { opacity: .72; transform: scaleX(.98); }
+          50% { opacity: 1; transform: scaleX(1); }
+        }
+
+        @keyframes statusSweep {
+          0% { transform: translateX(-100%); opacity: .2; }
+          50% { opacity: .75; }
+          100% { transform: translateX(100%); opacity: .2; }
+        }
+
+        @keyframes switchKnob {
+          from { transform: scale(.92); }
+          to { transform: scale(1); }
+        }
+
+        .metric-line {
+          transform-origin: left;
+          animation: metricPulse 2.6s ease-in-out infinite;
+        }
+
+        .status-sweep::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          width: 45%;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+          animation: statusSweep 2.8s ease-in-out infinite;
+        }
+
+        .senior-focus {
+          box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.20), 0 22px 60px rgba(15, 23, 42, 0.18);
+        }
       `}</style>
       <div className="absolute inset-0">
-        <div className="absolute -left-28 -top-20 h-96 w-96 rounded-full bg-cyan-500/20 blur-[120px]" />
+        <div className="absolute -left-28 -top-20 h-96 w-96 rounded-full bg-blue-500/20 blur-[120px]" />
         <div className="absolute right-0 top-20 h-96 w-96 rounded-full bg-purple-500/20 blur-[140px]" />
         <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(to_right,white_1px,transparent_1px),linear-gradient(to_bottom,white_1px,transparent_1px)] [background-size:48px_48px]" />
       </div>
@@ -1129,72 +1463,76 @@ export default function DashboardPage() {
         <aside
           className={`fixed inset-y-0 left-0 z-40 hidden h-screen w-72 overflow-y-auto premium-scrollbar border-r px-5 py-6 backdrop-blur-2xl xl:block ${
             isDark
-              ? "border-white/10 bg-[#050816]/92 shadow-[24px_0_90px_rgba(0,0,0,0.35)]"
-              : "border-slate-200 bg-white/92 shadow-[24px_0_70px_rgba(15,23,42,0.08)]"
+              ? "border-white/[0.075] bg-[#090F1A]/94 shadow-[24px_0_90px_rgba(0,0,0,0.58)]"
+              : "border-white/80 bg-white/94 shadow-[24px_0_70px_rgba(15,23,42,0.10)]"
           }`}
         >
-          <div className="premium-enter mb-8 flex items-center gap-3">
-            <div className="premium-float flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300 to-purple-400 text-xl font-black text-slate-950 shadow-lg shadow-cyan-500/20">
-              M
-            </div>
-            <div>
-              <p className={`text-sm font-semibold ${titleTextClass}`}>Mahu Plexus</p>
-              <p className={`text-xs ${softTextClass}`}>Admin panel</p>
+          <div className="premium-enter mb-7">
+            <div className={`relative overflow-hidden rounded-[28px] border p-4 senior-focus ${
+              isDark ? "border-white/[0.08] bg-white/[0.045]" : "border-slate-200 bg-slate-50/80"
+            }`}>
+              <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-blue-500/12 blur-3xl" />
+              <div className="relative flex items-center gap-3">
+                <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-blue-600 via-indigo-600 to-slate-900 text-xl font-black text-white shadow-[0_18px_45px_rgba(37,99,235,.24)]">
+                  M
+                </div>
+
+                <div className="min-w-0">
+                  <p className={`truncate text-sm font-semibold ${titleTextClass}`}>Mahu Plexus</p>
+                  <p className={`mt-0.5 truncate text-xs ${softTextClass}`}>Tienda conectada</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-blue-400 shadow-[0_0_16px_rgba(96,165,250,.72)]" />
+                    <span className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>Live</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <nav className="premium-enter space-y-2" style={{ animationDelay: "80ms" }}>
-            <a
-              href="/dashboard"
-              className={`flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                isDark
-                  ? "border-cyan-400/25 bg-cyan-400/10 text-cyan-100 shadow-[0_0_30px_rgba(34,211,238,0.12)]"
-                  : "border-cyan-200 bg-cyan-50 text-cyan-700"
-              }`}
-            >
-              <span>▣</span>
-              Dashboard
-            </a>
-
-            <a
-              href="/sales"
-              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <span>◈</span>
-              Ventas
-            </a>
-
-            <a
-              href="/sellers"
-              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <span>◎</span>
-              Vendedores
-            </a>
-
-            <a
-              href="/settings"
-              className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition ${
-                isDark ? "text-white/55 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <span>⚙</span>
-              Configuración
-            </a>
+            {[
+              { href: "/dashboard", label: "Dashboard", icon: "▦", active: true },
+              { href: "/sales", label: "Ventas", icon: "◷", active: false },
+              { href: "/sellers", label: "Vendedores", icon: "◎", active: false },
+              { href: "/settings", label: "Configuración", icon: "⚙", active: false },
+            ].map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                className={`group flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                  item.active
+                    ? isDark
+                      ? "border-blue-400/22 bg-blue-500/10 text-blue-100 shadow-[0_0_32px_rgba(59,130,246,0.11)]"
+                      : "border-blue-200 bg-blue-50 text-blue-700"
+                    : isDark
+                      ? "border-transparent text-white/58 hover:border-white/10 hover:bg-white/[0.055] hover:text-white"
+                      : "border-transparent text-slate-500 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <span className={`grid h-8 w-8 place-items-center rounded-xl transition ${
+                  item.active
+                    ? "bg-blue-500/14 text-blue-300"
+                    : isDark
+                      ? "bg-white/[0.04] text-white/45 group-hover:text-blue-300"
+                      : "bg-slate-100 text-slate-500 group-hover:text-blue-600"
+                }`}>
+                  {item.icon}
+                </span>
+                {item.label}
+              </a>
+            ))}
           </nav>
 
-          <div className={`mt-8 rounded-3xl border p-4 ${cardClass}`}>
+          <div className={`mt-8 rounded-[28px] border p-4 ${cardClass}`}>
             <p className={`text-xs uppercase tracking-[0.28em] ${softTextClass}`}>Estado</p>
             <div className="mt-4 flex items-center gap-3">
-              <span className="premium-glow h-3 w-3 rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.8)]" />
+              <span className="relative h-3 w-3 rounded-full bg-blue-400 shadow-[0_0_18px_rgba(96,165,250,0.85)]">
+                <span className="absolute inset-0 rounded-full bg-blue-400/45 animate-ping" />
+              </span>
               <p className={`text-sm font-semibold ${titleTextClass}`}>Sistema activo</p>
             </div>
             <p className={`mt-2 text-xs leading-5 ${softTextClass}`}>
-              Ventas, inventario y vendedores operando por negocio.
+              Inventario, ventas y vendedores sincronizados por negocio.
             </p>
           </div>
 
@@ -1203,9 +1541,9 @@ export default function DashboardPage() {
               await supabase.auth.signOut()
               router.push("/login")
             }}
-            className={`mt-6 w-full rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+            className={`mt-6 w-full rounded-2xl border px-4 py-3 text-sm font-semibold transition hover:-translate-y-0.5 ${
               isDark
-                ? "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                ? "border-white/10 bg-white/[0.045] text-white hover:bg-white/[0.075]"
                 : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
@@ -1214,7 +1552,7 @@ export default function DashboardPage() {
         </aside>
 
         <div className="min-w-0 px-4 py-5 md:px-6 lg:px-8 xl:ml-72">
-        <div className={`premium-enter sticky top-4 z-30 mb-5 flex flex-col gap-4 rounded-[28px] border px-5 py-4 backdrop-blur-2xl md:flex-row md:items-center md:justify-between ${surfaceClass}`}>
+        <div className={`premium-enter sticky top-4 z-30 mb-5 flex flex-col gap-4 edge-glow rounded-[32px] border px-5 py-4 backdrop-blur-2xl md:flex-row md:items-center md:justify-between ${surfaceClass}`}>
           <div>
             <div
               className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 backdrop-blur-xl ${
@@ -1235,37 +1573,115 @@ export default function DashboardPage() {
             </div>
 
             <h1 className={`mt-4 text-3xl font-semibold md:text-4xl ${titleTextClass}`}>
-              Bienvenido a Mahu Plexus
+              Mahu Plexus Hub
             </h1>
             <p className={`mt-2 text-sm ${isDark ? "text-white/50" : "text-gray-500"}`}>
-              Control central de ventas, inventario y rendimiento comercial.
+              Panel premium para ventas, inventario, vendedores e historial.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <div className={`hidden rounded-2xl border px-4 py-3 text-xs font-semibold md:block ${cardClass} ${mediumTextClass}`}>
-              {new Date().toLocaleDateString("es-PE")}
+            <div className={`hidden rounded-2xl border px-4 py-3 text-xs font-semibold md:flex md:items-center md:gap-3 ${cardClass} ${mediumTextClass}`}>
+              <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-500/10 text-blue-300">⌁</span>
+              <span className="capitalize">{formatHeaderDate()}</span>
             </div>
 
             <button
               onClick={toggleTheme}
-              className={`rounded-2xl border px-5 py-3 text-sm font-medium backdrop-blur-xl transition hover:-translate-y-0.5 ${
+              className={`group relative flex items-center gap-3 overflow-hidden rounded-2xl border px-3 py-2 text-sm font-semibold backdrop-blur-xl transition hover:-translate-y-0.5 ${
                 isDark
-                  ? "border-white/10 bg-white/10 text-white hover:bg-white/20"
+                  ? "border-white/10 bg-white/[0.065] text-white hover:bg-white/[0.095]"
                   : "border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
               }`}
             >
-              {isDark ? "☀️ Claro" : "🌙 Oscuro"}
+              <span className={`relative flex h-8 w-14 items-center rounded-full p-1 transition ${
+                isDark ? "bg-blue-500/18" : "bg-slate-200"
+              }`}>
+                <span className={`grid h-6 w-6 place-items-center rounded-full transition duration-300 ${
+                  isDark
+                    ? "translate-x-6 bg-blue-400 text-slate-950 shadow-[0_0_22px_rgba(96,165,250,.48)]"
+                    : "translate-x-0 bg-white text-slate-900 shadow"
+                }`}>
+                  {isDark ? "◐" : "☼"}
+                </span>
+              </span>
+              <span className="hidden sm:inline">{isDark ? "Oscuro" : "Claro"}</span>
             </button>
 
-            <div className={`relative overflow-hidden rounded-2xl border px-5 py-3 text-sm font-semibold ${cardClass}`}>
-              <div className="absolute inset-0 bg-gradient-to-r from-cyan-300/10 via-purple-400/10 to-transparent" />
+            <div
+              className={`group relative overflow-hidden rounded-[22px] border px-4 py-3 transition duration-300 hover:-translate-y-0.5 ${
+                isDark
+                  ? "border-white/[0.10] bg-white/[0.055]"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="panel-aura absolute -right-8 -top-8 h-20 w-20 rounded-full bg-blue-500/12 blur-2xl" />
               <div className="relative flex items-center gap-3">
-                <span className="premium-glow h-2.5 w-2.5 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.75)]" />
-                <div>
-                  <p className={`text-[10px] uppercase tracking-[0.22em] ${softTextClass}`}>Hora local</p>
-                  <p className={`font-mono text-base font-bold ${titleTextClass}`}>{currentTime || "--:--:--"}</p>
+                <div
+                  className={`grid h-10 w-10 place-items-center rounded-2xl border ${
+                    isDark
+                      ? "border-white/[0.10] bg-[#0B1220]"
+                      : "border-slate-200 bg-slate-50"
+                  }`}
+                >
+                  <span className="h-2.5 w-2.5 rounded-full bg-blue-500 shadow-[0_0_18px_rgba(59,130,246,0.45)]" />
                 </div>
+
+                <div>
+                  <p className={`text-[10px] uppercase tracking-[0.22em] ${softTextClass}`}>
+                    Tiempo real
+                  </p>
+                  <p className={`font-mono text-base font-semibold tabular-nums ${titleTextClass}`}>
+                    {currentTime || "--:--:--"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className={`premium-enter mb-5 rounded-[32px] border p-5 backdrop-blur-2xl ${surfaceClass}`} style={{ animationDelay: "65ms" }}>
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className={`text-xs uppercase tracking-[0.28em] ${softTextClass}`}>Live Operations</p>
+              <h2 className={`mt-2 text-2xl font-semibold md:text-3xl ${titleTextClass}`}>
+                Control ejecutivo del negocio
+              </h2>
+              <p className={`mt-2 max-w-2xl text-sm ${mediumTextClass}`}>
+                Inventario, ventas, vendedores e historial operativo en una sola vista.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className={`rounded-2xl border px-4 py-3 ${cardClass}`}>
+                <p className={`text-[10px] uppercase tracking-[0.2em] ${softTextClass}`}>Ventas hoy</p>
+                <p className={`mt-1 text-2xl font-bold ${titleTextClass}`}>{salesTodayCount}</p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+                  <div className="metric-line h-full rounded-full bg-blue-400" style={{ width: `${Math.min(100, salesTodayCount * 18)}%` }} />
+                </div>
+              </div>
+
+              <div className={`rounded-2xl border px-4 py-3 ${cardClass}`}>
+                <p className={`text-[10px] uppercase tracking-[0.2em] ${softTextClass}`}>Total vendido</p>
+                <p className={`mt-1 text-2xl font-bold ${titleTextClass}`}>S/ {totalToday.toFixed(2)}</p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+                  <div className="metric-line h-full rounded-full bg-indigo-400" style={{ width: `${Math.min(100, totalToday > 0 ? 76 : 8)}%` }} />
+                </div>
+              </div>
+
+              <div className={`rounded-2xl border px-4 py-3 ${cardClass}`}>
+                <p className={`text-[10px] uppercase tracking-[0.2em] ${softTextClass}`}>Stock</p>
+                <p className={`mt-1 text-2xl font-bold ${titleTextClass}`}>{totalStock}</p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
+                  <div className="metric-line h-full rounded-full bg-blue-300" style={{ width: `${Math.min(100, totalStock > 0 ? 68 : 8)}%` }} />
+                </div>
+              </div>
+
+              <div className={`rounded-2xl border px-4 py-3 ${cardClass}`}>
+                <p className={`text-[10px] uppercase tracking-[0.2em] ${softTextClass}`}>Riesgo</p>
+                <p className={`mt-1 text-2xl font-bold ${stockRiskPercent > 35 ? "text-rose-300" : "text-emerald-300"}`}>
+                  {stockRiskPercent}%
+                </p>
               </div>
             </div>
           </div>
@@ -1293,7 +1709,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="premium-enter mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4" style={{ animationDelay: "120ms" }}>
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:-translate-y-0.5 ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Ventas de hoy
             </p>
@@ -1302,701 +1718,230 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:-translate-y-0.5 ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Unidades vendidas
             </p>
-            <p className="mt-2 text-3xl font-semibold text-cyan-300">{unitsToday}</p>
+            <p className="mt-2 text-3xl font-semibold text-blue-400">{unitsToday}</p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:-translate-y-0.5 ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Total vendido
             </p>
-            <p className="mt-2 text-3xl font-semibold text-green-400">
+            <p className="mt-2 text-3xl font-semibold text-emerald-300">
               S/ {totalToday.toFixed(2)}
             </p>
           </div>
 
-          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:scale-[1.01] ${surfaceClass}`}>
+          <div className={`rounded-3xl border p-4 backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:-translate-y-0.5 ${surfaceClass}`}>
             <p className={`text-[11px] uppercase tracking-[0.24em] ${softTextClass}`}>
               Productos
             </p>
-            <p className="mt-2 text-3xl font-semibold text-purple-300">{totalProducts}</p>
+            <p className="mt-2 text-3xl font-semibold text-indigo-300">{totalProducts}</p>
           </div>
         </div>
 
-        <div className="premium-enter mb-6 grid gap-4 xl:grid-cols-3" style={{ animationDelay: "170ms" }}>
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl xl:col-span-2 ${surfaceClass}`}>
-            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="premium-enter mb-5 grid gap-4 2xl:grid-cols-[1.15fr_0.85fr]" style={{ animationDelay: "170ms" }}>
+          <div className={`rounded-[28px] border p-4 backdrop-blur-xl ${surfaceClass}`}>
+            <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className={`text-xl font-semibold ${titleTextClass}`}>Resumen general</h2>
-                <p className={`mt-1 text-sm ${softTextClass}`}>
-                  Estado actual del inventario y movimiento del negocio.
-                </p>
+                <h2 className={`text-lg font-semibold ${titleTextClass}`}>Resumen general</h2>
+                <p className={`mt-1 text-xs ${softTextClass}`}>Vista compacta para miles de productos.</p>
               </div>
 
-              <div className={`rounded-2xl border px-4 py-2 text-xs font-semibold ${cardClass} ${mediumTextClass}`}>
-                Salud inventario: {inventoryHealth}%
+              <div className={`rounded-2xl border px-3 py-1.5 text-xs font-semibold ${cardClass} ${mediumTextClass}`}>
+                Salud: {inventoryHealth}%
               </div>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
-                <p className={`text-sm ${softTextClass}`}>Stock total</p>
-                <p className={`mt-2 text-2xl font-semibold ${titleTextClass}`}>{totalStock}</p>
+            <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <p className={`text-[11px] ${softTextClass}`}>Stock total</p>
+                <p className={`mt-1 text-xl font-semibold ${titleTextClass}`}>{totalStock}</p>
               </div>
 
-              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
-                <p className={`text-sm ${softTextClass}`}>Valor estimado</p>
-                <p className="mt-2 text-2xl font-semibold text-cyan-300">
-                  S/ {totalValue.toFixed(2)}
-                </p>
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <p className={`text-[11px] ${softTextClass}`}>Valor estimado</p>
+                <p className="mt-1 text-xl font-semibold text-blue-400">S/ {totalValue.toFixed(2)}</p>
               </div>
 
-              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 ${cardClass}`}>
-                <p className={`text-sm ${softTextClass}`}>Sin stock</p>
-                <p className="mt-2 text-2xl font-semibold text-red-400">
-                  {outOfStockProducts.length}
-                </p>
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <p className={`text-[11px] ${softTextClass}`}>Sin stock</p>
+                <p className="mt-1 text-xl font-semibold text-rose-300">{outOfStockProducts.length}</p>
               </div>
 
-              <div className={`rounded-2xl border p-4 transition duration-300 hover:-translate-y-1 md:col-span-3 ${cardClass}`}>
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <p className={`text-sm ${softTextClass}`}>Ticket promedio de hoy</p>
-                    <p className="mt-2 text-2xl font-semibold text-emerald-300">
-                      S/ {averageTicketToday.toFixed(2)}
-                    </p>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-white/10 md:w-56">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-cyan-300"
-                      style={{ width: `${Math.min(100, averageTicketToday > 0 ? 78 : 0)}%` }}
-                    />
-                  </div>
-                </div>
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <p className={`text-[11px] ${softTextClass}`}>Ticket hoy</p>
+                <p className="mt-1 text-xl font-semibold text-emerald-300">S/ {averageTicketToday.toFixed(2)}</p>
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_0.8fr]">
-              <div className={`rounded-[26px] border p-4 ${cardClass}`}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <p className={`text-sm font-semibold ${titleTextClass}`}>Ventas últimos 7 días</p>
-                    <p className={`mt-1 text-xs ${softTextClass}`}>Gráfico real basado en ventas registradas.</p>
-                  </div>
-                  <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+            <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className={`text-sm font-semibold ${titleTextClass}`}>Ventas últimos 7 días</p>
+                  <span className="rounded-full bg-blue-500/10 px-2.5 py-1 text-[11px] font-semibold text-blue-400">
                     {sales.length} venta(s)
                   </span>
                 </div>
 
-                <div className="flex h-44 items-end gap-3 rounded-[22px] border border-white/10 bg-black/10 p-4">
-                  {salesTrend.map((day, index) => (
-                    <div
-                      key={day.key}
-                      className="group flex h-full min-w-0 flex-1 flex-col justify-end gap-2"
-                      style={{ animationDelay: `${index * 60}ms` }}
-                    >
+                <div className="flex h-32 items-end gap-2">
+                  {salesLast7Days.map((item) => (
+                    <div key={item.label} className="flex h-full flex-1 flex-col justify-end gap-1">
                       <div
-                        className="premium-enter rounded-t-2xl bg-gradient-to-t from-cyan-400 via-sky-300 to-purple-400 shadow-[0_0_26px_rgba(34,211,238,0.22)] transition duration-300 group-hover:scale-x-110"
-                        style={{ height: `${day.height}%` }}
-                        title={`S/ ${day.amount.toFixed(2)} · ${day.count} venta(s)`}
+                        className="min-h-[8px] rounded-t-xl bg-gradient-to-t from-blue-600 to-indigo-400 shadow-[0_0_18px_rgba(34,211,238,0.20)]"
+                        style={{ height: `${Math.max(8, (item.total / maxSalesDay) * 100)}%` }}
+                        title={`S/ ${item.total.toFixed(2)}`}
                       />
-                      <p className={`truncate text-center text-[11px] capitalize ${softTextClass}`}>{day.label}</p>
+                      <span className={`truncate text-center text-[10px] ${softTextClass}`}>{item.label}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className={`rounded-[26px] border p-4 ${cardClass}`}>
-                <div className="mb-3">
-                  <p className={`text-sm font-semibold ${titleTextClass}`}>Inventario visual</p>
-                  <p className={`mt-1 text-xs ${softTextClass}`}>Disponibilidad y riesgo.</p>
-                </div>
-
-                <div className="flex items-center justify-center py-2">
-                  <div
-                    className="premium-float grid h-36 w-36 place-items-center rounded-full"
-                    style={{
-                      background: `conic-gradient(rgb(34 211 238) ${inventoryHealth * 3.6}deg, rgb(248 113 113) ${inventoryHealth * 3.6}deg ${Math.max(inventoryHealth + stockRiskPercent, inventoryHealth) * 3.6}deg, rgba(148,163,184,0.22) 0deg)`,
-                    }}
-                  >
-                    <div className={`grid h-24 w-24 place-items-center rounded-full ${isDark ? "bg-[#050816]" : "bg-white"}`}>
-                      <div className="text-center">
-                        <p className={`text-2xl font-bold ${titleTextClass}`}>{inventoryHealth}%</p>
-                        <p className={`text-[11px] ${softTextClass}`}>operativo</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-2xl bg-cyan-400/10 p-3">
-                    <p className="text-lg font-bold text-cyan-300">{products.length}</p>
-                    <p className={`text-[11px] ${softTextClass}`}>productos</p>
-                  </div>
-                  <div className="rounded-2xl bg-red-400/10 p-3">
-                    <p className="text-lg font-bold text-red-300">{stockRiskPercent}%</p>
-                    <p className={`text-[11px] ${softTextClass}`}>riesgo</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className={`mt-4 rounded-[26px] border p-4 ${cardClass}`}>
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className={`text-sm font-semibold ${titleTextClass}`}>Stock por producto</p>
-                  <p className={`mt-1 text-xs ${softTextClass}`}>Top productos con mayor stock.</p>
-                </div>
-              </div>
-
-              {stockChartData.length === 0 ? (
-                <p className={`py-8 text-center text-sm ${softTextClass}`}>Aún no hay productos para graficar.</p>
-              ) : (
-                <div className="flex h-36 items-end gap-3">
-                  {stockChartData.map((item, index) => (
-                    <div key={item.id} className="group flex h-full min-w-0 flex-1 flex-col justify-end gap-2">
-                      <div
-                        className="premium-enter rounded-t-2xl bg-gradient-to-t from-purple-500 to-cyan-300 transition duration-300 group-hover:scale-x-110"
-                        style={{ height: `${item.height}%`, animationDelay: `${index * 70}ms` }}
-                        title={`${item.name}: ${item.stock}`}
-                      />
-                      <p className={`truncate text-center text-[11px] ${softTextClass}`}>{item.name}</p>
+              <div className={`rounded-2xl border p-3 ${cardClass}`}>
+                <p className={`text-sm font-semibold ${titleTextClass}`}>Stock crítico</p>
+                <div className="mt-3 space-y-2">
+                  {lowStockProducts.slice(0, 4).map((product) => (
+                    <div key={product.id} className="flex items-center justify-between gap-3">
+                      <p className={`truncate text-xs font-medium ${mediumTextClass}`}>{product.name}</p>
+                      <span className="rounded-full bg-amber-400/10 px-2 py-1 text-[10px] font-semibold text-amber-300">
+                        {product.stock}
+                      </span>
                     </div>
                   ))}
+
+                  {lowStockProducts.length === 0 && (
+                    <p className={`text-xs ${softTextClass}`}>Sin alertas críticas.</p>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
 
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>Alertas</h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Productos que requieren atención.
-              </p>
-            </div>
-
-            <div className="space-y-2.5">
-              {lowStockProducts.length === 0 && outOfStockProducts.length === 0 ? (
-                <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                  <p className="text-sm font-medium text-emerald-300">Todo está bajo control</p>
-                  <p className={`mt-1 text-sm ${isDark ? "text-white/50" : "text-gray-500"}`}>
-                    No hay alertas de stock por ahora.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {lowStockProducts.slice(0, 3).map((product) => (
-                    <div
-                      key={product.id}
-                      className="rounded-2xl border border-yellow-400/20 bg-yellow-400/10 p-3.5"
-                    >
-                      <p className="font-medium text-yellow-300">{product.name}</p>
-                      <p className={`mt-1 text-sm ${mediumTextClass}`}>
-                        Stock bajo: {product.stock}
-                        {product.serial_code ? ` · Serie: ${product.serial_code}` : ""}
-                      </p>
-                    </div>
-                  ))}
-
-                  {outOfStockProducts.slice(0, 2).map((product) => (
-                    <div
-                      key={product.id}
-                      className="rounded-2xl border border-red-400/20 bg-red-400/10 p-3.5"
-                    >
-                      <p className="font-medium text-red-300">{product.name}</p>
-                      <p className={`mt-1 text-sm ${mediumTextClass}`}>
-                        Producto agotado
-                        {product.serial_code ? ` · Serie: ${product.serial_code}` : ""}
-                      </p>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="premium-enter mb-6 grid gap-4 xl:grid-cols-2" style={{ animationDelay: "220ms" }}>
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4 flex items-start justify-between gap-4">
+          <div className={`rounded-[28px] border p-4 backdrop-blur-xl ${surfaceClass}`}>
+            <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className={`text-xl font-semibold ${titleTextClass}`}>Top vendedor general</h2>
-                <p className={`mt-1 text-sm ${softTextClass}`}>
-                  Mejor rendimiento acumulado.
-                </p>
+                <h2 className={`text-lg font-semibold ${titleTextClass}`}>Top vendedor</h2>
+                <p className={`mt-1 text-xs ${softTextClass}`}>Rendimiento compacto.</p>
               </div>
-              <div className="text-3xl">🥇</div>
+              <div className="scale-90">{topSeller ? renderMedal(0) : null}</div>
             </div>
 
             {topSeller ? (
               <div className={`rounded-2xl border p-4 ${cardClass}`}>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-lg font-bold text-cyan-300">
-                    {getInitials(topSeller.seller_name)}
-                  </div>
+                <p className={`truncate text-base font-semibold ${titleTextClass}`}>{topSeller.seller_name}</p>
+                <p className={`mt-1 truncate text-xs ${softTextClass}`}>{topSeller.seller_email}</p>
 
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm ${softTextClass}`}>Vendedor destacado</p>
-                    <p className={`mt-1 text-xl font-semibold break-words ${titleTextClass}`}>
-                      {topSeller.seller_name}
-                    </p>
-                    <p className={`mt-1 text-sm break-all ${softTextClass}`}>
-                      {topSeller.seller_email}
-                    </p>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <div>
+                    <p className={`text-[10px] uppercase tracking-[0.16em] ${softTextClass}`}>Ventas</p>
+                    <p className={`mt-1 text-lg font-bold ${titleTextClass}`}>{topSeller.total_sales}</p>
                   </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Ventas</p>
-                    <p className={`mt-1 text-xl font-bold ${titleTextClass}`}>
-                      {topSeller.total_sales}
-                    </p>
+                  <div>
+                    <p className={`text-[10px] uppercase tracking-[0.16em] ${softTextClass}`}>Unid.</p>
+                    <p className="mt-1 text-lg font-bold text-blue-400">{topSeller.total_units}</p>
                   </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Unidades</p>
-                    <p className="mt-1 text-xl font-bold text-cyan-300">
-                      {topSeller.total_units}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Total</p>
-                    <p className="mt-1 text-xl font-bold text-green-400">
-                      S/ {topSeller.total_amount.toFixed(2)}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Participación</p>
-                    <p className="mt-1 text-xl font-bold text-purple-300">
-                      {topSeller.participation.toFixed(1)}%
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className={softTextClass}>Participación total</span>
-                    <span className="font-semibold text-cyan-300">
-                      {topSeller.participation.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-purple-500"
-                      style={{ width: `${Math.min(topSeller.participation, 100)}%` }}
-                    />
+                  <div>
+                    <p className={`text-[10px] uppercase tracking-[0.16em] ${softTextClass}`}>Total</p>
+                    <p className="mt-1 text-lg font-bold text-emerald-300">S/ {topSeller.total_amount.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
             ) : (
-              <div className={`rounded-2xl border border-dashed p-8 text-center ${cardClass}`}>
-                <p className={`text-lg ${isDark ? "text-white/60" : "text-gray-500"}`}>
-                  Aún no hay ventas por vendedor
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h2 className={`text-xl font-semibold ${titleTextClass}`}>Top vendedor de hoy</h2>
-                <p className={`mt-1 text-sm ${softTextClass}`}>
-                  Mejor rendimiento del día.
-                </p>
-              </div>
-              <div className="text-3xl">🏆</div>
-            </div>
-
-            {topSellerToday ? (
-              <div className={`rounded-2xl border p-4 ${cardClass}`}>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-purple-400/20 bg-purple-400/10 text-lg font-bold text-purple-300">
-                    {getInitials(topSellerToday.seller_name)}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-sm ${softTextClass}`}>Vendedor destacado hoy</p>
-                    <p className={`mt-1 text-xl font-semibold break-words ${titleTextClass}`}>
-                      {topSellerToday.seller_name}
-                    </p>
-                    <p className={`mt-1 text-sm break-all ${softTextClass}`}>
-                      {topSellerToday.seller_email}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Ventas hoy</p>
-                    <p className={`mt-1 text-xl font-bold ${titleTextClass}`}>
-                      {topSellerToday.total_sales}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Unidades</p>
-                    <p className="mt-1 text-xl font-bold text-cyan-300">
-                      {topSellerToday.total_units}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Total hoy</p>
-                    <p className="mt-1 text-xl font-bold text-green-400">
-                      S/ {topSellerToday.total_amount.toFixed(2)}
-                    </p>
-                  </div>
-
-                  <div className={`rounded-2xl border p-3.5 ${cardClass}`}>
-                    <p className={`text-[11px] uppercase tracking-[0.2em] ${softTextClass}`}>Participación</p>
-                    <p className="mt-1 text-xl font-bold text-purple-300">
-                      {topSellerToday.participation.toFixed(1)}%
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-sm">
-                    <span className={softTextClass}>Participación de hoy</span>
-                    <span className="font-semibold text-cyan-300">
-                      {topSellerToday.participation.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-purple-400 to-cyan-400"
-                      style={{ width: `${Math.min(topSellerToday.participation, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className={`rounded-2xl border border-dashed p-8 text-center ${cardClass}`}>
-                <p className={`text-lg ${isDark ? "text-white/60" : "text-gray-500"}`}>
-                  Hoy todavía no hay ventas registradas
-                </p>
+              <div className={`rounded-2xl border border-dashed p-6 text-center ${cardClass}`}>
+                <p className={`text-sm ${softTextClass}`}>Aún no hay ventas.</p>
               </div>
             )}
           </div>
         </div>
 
-        <div className="mb-6 grid gap-4 xl:grid-cols-2">
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>
-                Historial de ventas por vendedor
-              </h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Resumen acumulado.
-              </p>
+        <div className="mb-5 grid gap-4 xl:grid-cols-2">
+          <div className={`rounded-[28px] border p-4 backdrop-blur-xl ${surfaceClass}`}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className={`text-lg font-semibold ${titleTextClass}`}>Ventas por vendedor</h2>
+                <p className={`mt-1 text-xs ${softTextClass}`}>Resumen compacto acumulado.</p>
+              </div>
+
+              <span className={`rounded-2xl border px-3 py-1.5 text-xs font-semibold ${cardClass} ${mediumTextClass}`}>
+                {sellerSummary.length} vendedor(es)
+              </span>
             </div>
 
             {sellerSummary.length === 0 ? (
-              <div className={`rounded-2xl border border-dashed p-8 text-center ${cardClass}`}>
-                <p className={`text-lg ${isDark ? "text-white/60" : "text-gray-500"}`}>
-                  Aún no hay historial disponible
-                </p>
+              <div className={`rounded-2xl border border-dashed p-6 text-center ${cardClass}`}>
+                <p className={`text-sm ${softTextClass}`}>Aún no hay historial disponible.</p>
               </div>
             ) : (
-              <div className="grid gap-2.5">
-                {sellerSummary.map((seller, index) => (
-                  <div
-                    key={seller.seller_id}
-                    className={`rounded-2xl border p-4 ${cardClass}`}
-                  >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-base">
-                          {getMedal(index)}
-                        </div>
+              <div className="premium-scrollbar max-h-[360px] overflow-y-auto pr-1">
+                <div className="grid gap-2">
+                  {sellerSummary.map((seller, index) => (
+                    <div key={seller.seller_id} className={`grid grid-cols-[42px_minmax(0,1fr)_92px_92px] items-center gap-3 rounded-2xl border px-3 py-2.5 ${cardClass}`}>
+                      <div className="scale-75">{renderMedal(index)}</div>
 
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-400/10 text-sm font-bold text-cyan-300">
-                          {getInitials(seller.seller_name)}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <h3 className={`text-base font-semibold break-words ${titleTextClass}`}>
-                            {seller.seller_name}
-                          </h3>
-                          <p className={`mt-1 text-sm break-all ${mediumTextClass}`}>
-                            {seller.seller_email}
-                          </p>
-                        </div>
+                      <div className="min-w-0">
+                        <p className={`truncate text-sm font-semibold ${titleTextClass}`}>{seller.seller_name}</p>
+                        <p className={`truncate text-[11px] ${softTextClass}`}>{seller.seller_email}</p>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Ventas
-                          </p>
-                          <p className={`mt-1 text-lg font-bold ${titleTextClass}`}>
-                            {seller.total_sales}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Unidades
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-cyan-300">
-                            {seller.total_units}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Total
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-green-400">
-                            S/ {seller.total_amount.toFixed(2)}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Participación
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-purple-300">
-                            {seller.participation.toFixed(1)}%
-                          </p>
-                        </div>
+                      <div className="text-right">
+                        <p className={`text-[10px] uppercase tracking-[0.14em] ${softTextClass}`}>Ventas</p>
+                        <p className={`text-sm font-bold ${titleTextClass}`}>{seller.total_sales}</p>
                       </div>
 
-                      <div>
-                        <div className="mb-2 flex items-center justify-between text-sm">
-                          <span className={softTextClass}>Progreso</span>
-                          <span className="font-semibold text-cyan-300">
-                            {seller.participation.toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-purple-500"
-                            style={{ width: `${Math.min(seller.participation, 100)}%` }}
-                          />
-                        </div>
+                      <div className="text-right">
+                        <p className={`text-[10px] uppercase tracking-[0.14em] ${softTextClass}`}>Total</p>
+                        <p className="text-sm font-bold text-emerald-300">S/ {seller.total_amount.toFixed(2)}</p>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>
-                Ventas de hoy por vendedor
-              </h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Comparativa diaria.
-              </p>
+          <div className={`rounded-[28px] border p-4 backdrop-blur-xl ${surfaceClass}`}>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className={`text-lg font-semibold ${titleTextClass}`}>Ventas por vendedor hoy</h2>
+                <p className={`mt-1 text-xs ${softTextClass}`}>Actividad del día.</p>
+              </div>
+
+              <span className={`rounded-2xl border px-3 py-1.5 text-xs font-semibold ${cardClass} ${mediumTextClass}`}>
+                {sellerSummaryToday.length} activo(s)
+              </span>
             </div>
 
             {sellerSummaryToday.length === 0 ? (
-              <div className={`rounded-2xl border border-dashed p-8 text-center ${cardClass}`}>
-                <p className={`text-lg ${isDark ? "text-white/60" : "text-gray-500"}`}>
-                  Hoy todavía no hay ventas registradas
-                </p>
+              <div className={`rounded-2xl border border-dashed p-6 text-center ${cardClass}`}>
+                <p className={`text-sm ${softTextClass}`}>Hoy todavía no hay ventas registradas.</p>
               </div>
             ) : (
-              <div className="grid gap-2.5">
-                {sellerSummaryToday.map((seller, index) => (
-                  <div
-                    key={`today-${seller.seller_id}`}
-                    className={`rounded-2xl border p-4 ${cardClass}`}
-                  >
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-base">
-                          {getMedal(index)}
-                        </div>
+              <div className="premium-scrollbar max-h-[360px] overflow-y-auto pr-1">
+                <div className="grid gap-2">
+                  {sellerSummaryToday.map((seller, index) => (
+                    <div key={seller.seller_id} className={`grid grid-cols-[42px_minmax(0,1fr)_92px_92px] items-center gap-3 rounded-2xl border px-3 py-2.5 ${cardClass}`}>
+                      <div className="scale-75">{renderMedal(index)}</div>
 
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-purple-400/20 bg-purple-400/10 text-sm font-bold text-purple-300">
-                          {getInitials(seller.seller_name)}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <h3 className={`text-base font-semibold break-words ${titleTextClass}`}>
-                            {seller.seller_name}
-                          </h3>
-                          <p className={`mt-1 text-sm break-all ${mediumTextClass}`}>
-                            {seller.seller_email}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Ventas hoy
-                          </p>
-                          <p className={`mt-1 text-lg font-bold ${titleTextClass}`}>
-                            {seller.total_sales}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Unidades
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-cyan-300">
-                            {seller.total_units}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Total hoy
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-green-400">
-                            S/ {seller.total_amount.toFixed(2)}
-                          </p>
-                        </div>
-
-                        <div className={`rounded-2xl border p-3 ${cardClass}`}>
-                          <p className={`text-[10px] uppercase tracking-[0.18em] ${softTextClass}`}>
-                            Participación
-                          </p>
-                          <p className="mt-1 text-lg font-bold text-purple-300">
-                            {seller.participation.toFixed(1)}%
-                          </p>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="mb-2 flex items-center justify-between text-sm">
-                          <span className={softTextClass}>Progreso del día</span>
-                          <span className="font-semibold text-cyan-300">
-                            {seller.participation.toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-purple-400 to-cyan-400"
-                            style={{ width: `${Math.min(seller.participation, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mb-6 grid gap-4 xl:grid-cols-[1fr_1.25fr]">
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>
-                {editing ? "Actualizar producto" : "Crear producto"}
-              </h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Agrega o edita productos con código de serie.
-              </p>
-            </div>
-
-            <div className="grid gap-3">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Producto"
-                className={`rounded-2xl border p-4 outline-none focus:border-cyan-400 ${inputClass}`}
-              />
-              <div className="grid gap-3 md:grid-cols-2">
-                <input
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="Precio"
-                  className={`rounded-2xl border p-4 outline-none focus:border-cyan-400 ${inputClass}`}
-                />
-                <input
-                  value={stock}
-                  onChange={(e) => setStock(e.target.value)}
-                  placeholder="Stock"
-                  className={`rounded-2xl border p-4 outline-none focus:border-cyan-400 ${inputClass}`}
-                />
-              </div>
-              <input
-                value={serialCode}
-                onChange={(e) => setSerialCode(e.target.value)}
-                placeholder="Código / serie"
-                className={`rounded-2xl border p-4 outline-none focus:border-cyan-400 ${inputClass}`}
-              />
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Descripción"
-                className={`rounded-2xl border p-4 outline-none focus:border-cyan-400 ${inputClass}`}
-              />
-            </div>
-
-            <button
-              onClick={handleSave}
-              className="mt-4 w-full rounded-2xl bg-gradient-to-r from-cyan-400 to-purple-500 px-4 py-4 font-semibold text-black transition hover:scale-[1.01]"
-            >
-              {editing ? "Actualizar" : "Crear"}
-            </button>
-          </div>
-
-          <div className={`rounded-3xl border p-5 backdrop-blur-xl ${surfaceClass}`}>
-            <div className="mb-4">
-              <h2 className={`text-xl font-semibold ${titleTextClass}`}>Productos recientes</h2>
-              <p className={`mt-1 text-sm ${softTextClass}`}>
-                Últimos productos cargados para una revisión rápida.
-              </p>
-            </div>
-
-            {recentProducts.length === 0 ? (
-              <div className={`rounded-2xl border border-dashed p-8 text-center ${cardClass}`}>
-                <p className={`text-lg ${isDark ? "text-white/60" : "text-gray-500"}`}>
-                  Aún no hay productos registrados
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2">
-                {recentProducts.map((product) => (
-                  <div key={product.id} className={`rounded-2xl border p-4 ${cardClass}`}>
-                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className={`truncate text-base font-semibold ${titleTextClass}`}>
-                          {product.name}
-                        </p>
-                        <p className={`mt-1 truncate text-sm ${softTextClass}`}>
-                          {product.serial_code || "Sin serie"}
-                        </p>
+                        <p className={`truncate text-sm font-semibold ${titleTextClass}`}>{seller.seller_name}</p>
+                        <p className={`truncate text-[11px] ${softTextClass}`}>{seller.seller_email}</p>
                       </div>
 
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                          Number(product.stock) === 0
-                            ? "bg-red-500/15 text-red-300"
-                            : Number(product.stock) <= 5
-                              ? "bg-yellow-500/15 text-yellow-300"
-                              : isDark
-                                ? "bg-white/10 text-white"
-                                : "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        Stock {product.stock}
-                      </span>
-                    </div>
+                      <div className="text-right">
+                        <p className={`text-[10px] uppercase tracking-[0.14em] ${softTextClass}`}>Unid.</p>
+                        <p className="text-sm font-bold text-blue-400">{seller.total_units}</p>
+                      </div>
 
-                    <p className="mt-3 text-lg font-semibold text-cyan-300">
-                      S/ {Number(product.price).toFixed(2)}
-                    </p>
-                  </div>
-                ))}
+                      <div className="text-right">
+                        <p className={`text-[10px] uppercase tracking-[0.14em] ${softTextClass}`}>Total</p>
+                        <p className="text-sm font-bold text-emerald-300">S/ {seller.total_amount.toFixed(2)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -2021,7 +1966,7 @@ export default function DashboardPage() {
                   onClick={exportInventoryToExcel}
                   className={`rounded-2xl border px-4 py-2 text-xs font-bold transition hover:-translate-y-0.5 ${
                     isDark
-                      ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200 hover:bg-emerald-300/15"
+                      ? "border-[#10B981]/25 bg-[#10B981]/10 text-emerald-200 hover:bg-[#10B981]/15"
                       : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                   }`}
                 >
@@ -2032,8 +1977,8 @@ export default function DashboardPage() {
                   onClick={exportSalesToExcel}
                   className={`rounded-2xl border px-4 py-2 text-xs font-bold transition hover:-translate-y-0.5 ${
                     isDark
-                      ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-200 hover:bg-cyan-300/15"
-                      : "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
+                      ? "border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/15"
+                      : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
                   }`}
                 >
                   Exportar ventas
@@ -2047,14 +1992,14 @@ export default function DashboardPage() {
                 placeholder="Buscar producto o código de serie..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className={`w-full rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+                className={`w-full rounded-2xl border px-5 py-4 outline-none transition focus:border-blue-400 ${inputClass}`}
               />
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <select
                   value={inventorySort}
                   onChange={(e) => setInventorySort(e.target.value as InventorySort)}
-                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-blue-400 ${inputClass}`}
                 >
                   <option value="name">Orden: nombre</option>
                   <option value="stock_low">Stock bajo primero</option>
@@ -2066,7 +2011,7 @@ export default function DashboardPage() {
                 <select
                   value={inventoryPageSize}
                   onChange={(e) => setInventoryPageSize(Number(e.target.value))}
-                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-cyan-400 ${inputClass}`}
+                  className={`rounded-2xl border px-5 py-4 outline-none transition focus:border-blue-400 ${inputClass}`}
                 >
                   <option value={25}>25 por página</option>
                   <option value={50}>50 por página</option>
@@ -2096,8 +2041,8 @@ export default function DashboardPage() {
               className={`${tabBaseClass} ${
                 inventoryTab === "all"
                   ? isDark
-                    ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-200"
-                    : "border-cyan-300 bg-cyan-50 text-cyan-700"
+                    ? "border-blue-400/30 bg-blue-500/10 text-blue-300"
+                    : "border-blue-300 bg-blue-50 text-blue-700"
                   : isDark
                     ? "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
                     : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
@@ -2111,7 +2056,7 @@ export default function DashboardPage() {
               className={`${tabBaseClass} ${
                 inventoryTab === "low"
                   ? isDark
-                    ? "border-yellow-400/30 bg-yellow-400/10 text-yellow-200"
+                    ? "border-yellow-400/30 bg-amber-400/10 text-yellow-200"
                     : "border-yellow-300 bg-yellow-50 text-yellow-700"
                   : isDark
                     ? "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
@@ -2153,17 +2098,19 @@ export default function DashboardPage() {
           ) : (
             <div className="overflow-hidden rounded-[26px] border border-white/10">
               <div
-                className={`sticky top-0 z-10 hidden grid-cols-[minmax(0,1.8fr)_120px_150px_170px] gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.22em] xl:grid ${
+                className={`sticky top-0 z-10 hidden grid-cols-[minmax(0,1.55fr)_110px_120px_135px_135px_150px] gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.22em] xl:grid ${
                   isDark ? "bg-white/[0.05] text-white/45" : "bg-slate-50 text-slate-500"
                 }`}
               >
                 <p>Producto</p>
                 <p>Stock</p>
                 <p>Precio</p>
+                <p>Ingreso</p>
+                <p>Actualizado</p>
                 <p className="text-right">Acciones</p>
               </div>
 
-              <div key={animateKey} className="premium-scrollbar max-h-[620px] overflow-y-auto p-2">
+              <div key={animateKey} className="premium-scrollbar max-h-[560px] overflow-y-auto p-2">
                 <div className="grid gap-2.5">
                   {paginatedInventoryList.map((p) => (
                 <div
@@ -2174,7 +2121,7 @@ export default function DashboardPage() {
                       : "border-gray-200 bg-white shadow-sm hover:bg-gray-50"
                   }`}
                 >
-                  <div className="grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_120px_150px_170px] xl:items-center">
+                  <div className="grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_110px_120px_135px_135px_150px] xl:items-center">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`truncate text-base font-semibold ${titleTextClass}`}>
@@ -2185,8 +2132,8 @@ export default function DashboardPage() {
                           <span
                             className={`rounded-full px-2 py-1 text-[10px] ${
                               isDark
-                                ? "border border-cyan-400/20 bg-cyan-400/10 text-cyan-200"
-                                : "border border-cyan-200 bg-cyan-50 text-cyan-700"
+                                ? "border border-blue-500/20 bg-blue-500/10 text-blue-300"
+                                : "border border-blue-200 bg-blue-50 text-blue-700"
                             }`}
                           >
                             Serie
@@ -2206,9 +2153,9 @@ export default function DashboardPage() {
                       <span
                         className={`mt-1 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
                           Number(p.stock) === 0
-                            ? "bg-red-500/15 text-red-300"
+                            ? "bg-rose-500/15 text-rose-300"
                             : Number(p.stock) <= 5
-                              ? "bg-yellow-500/15 text-yellow-300"
+                              ? "bg-yellow-500/15 text-amber-300"
                               : isDark
                                 ? "bg-white/10 text-white"
                                 : "bg-gray-100 text-gray-800"
@@ -2222,22 +2169,32 @@ export default function DashboardPage() {
                       <p className={`text-[10px] uppercase tracking-[0.2em] xl:hidden ${softTextClass}`}>
                         Precio
                       </p>
-                      <p className="mt-1 text-lg font-bold text-cyan-300">
+                      <p className="mt-1 text-lg font-bold text-blue-400">
                         S/ {Number(p.price).toFixed(2)}
                       </p>
+                    </div>
+
+                    <div>
+                      <p className={`text-[10px] uppercase tracking-[0.14em] xl:hidden ${softTextClass}`}>Ingreso</p>
+                      <p className={`font-mono text-[11px] leading-5 ${mediumTextClass}`}>{formatProductDate(p.created_at)}</p>
+                    </div>
+
+                    <div>
+                      <p className={`text-[10px] uppercase tracking-[0.14em] xl:hidden ${softTextClass}`}>Actualizado</p>
+                      <p className={`font-mono text-[11px] leading-5 ${mediumTextClass}`}>{formatProductDate(p.updated_at)}</p>
                     </div>
 
                     <div className="flex gap-2 xl:justify-end">
                       <button
                         onClick={() => handleEdit(p)}
-                        className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90"
+                        className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-[#111827] transition hover:opacity-90"
                       >
                         Editar
                       </button>
 
                       <button
                         onClick={() => handleDelete(p.id)}
-                        className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+                        className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
                       >
                         Eliminar
                       </button>
@@ -2301,7 +2258,7 @@ export default function DashboardPage() {
           <div className="grid gap-3 md:grid-cols-3">
             <div className={`rounded-2xl border p-4 ${cardClass}`}>
               <p className={`text-xs uppercase tracking-[0.2em] ${softTextClass}`}>Riesgo de stock</p>
-              <p className="mt-2 text-2xl font-bold text-red-300">{stockRiskPercent}%</p>
+              <p className="mt-2 text-2xl font-bold text-rose-300">{stockRiskPercent}%</p>
               <p className={`mt-1 text-sm ${mediumTextClass}`}>
                 Productos con stock bajo o agotado.
               </p>
@@ -2309,7 +2266,7 @@ export default function DashboardPage() {
 
             <div className={`rounded-2xl border p-4 ${cardClass}`}>
               <p className={`text-xs uppercase tracking-[0.2em] ${softTextClass}`}>Movimiento</p>
-              <p className="mt-2 text-2xl font-bold text-cyan-300">{salesTodayCount}</p>
+              <p className="mt-2 text-2xl font-bold text-blue-400">{salesTodayCount}</p>
               <p className={`mt-1 text-sm ${mediumTextClass}`}>
                 Ventas registradas hoy.
               </p>
@@ -2325,78 +2282,194 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <div className={`premium-enter mb-8 rounded-[32px] border p-5 md:p-6 backdrop-blur-2xl ${surfaceClass}`} style={{ animationDelay: "360ms" }}>
+          <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className={`text-xs uppercase tracking-[0.28em] ${softTextClass}`}>Activity ledger</p>
+              <h2 className={`mt-2 text-xl font-semibold ${titleTextClass}`}>Historial operativo</h2>
+              <p className={`mt-1 text-sm ${mediumTextClass}`}>
+                Quién creó, editó o eliminó productos, con fecha, hora y usuario responsable.
+              </p>
+            </div>
+
+            <button
+              onClick={() => businessId && loadMovements(businessId)}
+              disabled={isRefreshingMovements}
+              className={`status-sweep relative overflow-hidden rounded-2xl border px-4 py-2 text-sm font-semibold transition hover:-translate-y-0.5 disabled:cursor-wait ${
+                isDark
+                  ? "border-blue-500/25 bg-blue-500/10 text-blue-100 hover:bg-blue-500/15"
+                  : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+              }`}
+            >
+              <span className="relative z-10">
+                {isRefreshingMovements ? "Actualizando..." : `Actualizado ${formatRefreshTime(lastMovementRefreshAt)}`}
+              </span>
+            </button>
+          </div>
+
+          {inventoryMovements.length === 0 ? (
+            <div className={`rounded-2xl border p-5 text-sm ${cardClass} ${softTextClass}`}>
+              Aún no hay movimientos registrados. Crea, edita o elimina un producto para iniciar el historial.
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-[24px] border border-white/10">
+              <div className={`hidden grid-cols-[150px_minmax(0,1fr)_160px_150px] gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.22em] md:grid ${
+                isDark ? "bg-white/[0.05] text-slate-400" : "bg-slate-50 text-slate-500"
+              }`}>
+                <p>Movimiento</p>
+                <p>Detalle</p>
+                <p>Usuario</p>
+                <p>Fecha y hora</p>
+              </div>
+
+              <div className="divide-y divide-white/10">
+                {inventoryMovements.map((movement) => {
+                  const actor = movement.user_id
+                    ? sellerProfiles[movement.user_id]?.full_name || "Usuario"
+                    : "Registro anterior"
+
+                  const movementLabel =
+                    movement.type === "created"
+                      ? "Ingreso"
+                      : movement.type === "updated"
+                        ? "Edición"
+                        : movement.type === "sold"
+                          ? "Salida"
+                          : "Eliminado"
+
+                  const badgeClass =
+                    movement.type === "deleted"
+                      ? "bg-rose-500/10 text-rose-300 border-rose-400/18"
+                      : movement.type === "sold"
+                        ? "bg-indigo-500/10 text-indigo-200 border-indigo-400/18"
+                        : "bg-blue-500/10 text-blue-200 border-blue-400/18"
+
+                  return (
+                    <div
+                      key={movement.id}
+                      className={`grid gap-3 px-4 py-4 md:grid-cols-[150px_minmax(0,1fr)_160px_150px] ${
+                        isDark ? "bg-[#121620]/68 hover:bg-white/[0.055]" : "bg-white hover:bg-slate-50"
+                      } premium-table-row transition`}
+                    >
+                      <div>
+                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${badgeClass}`}>
+                          {movementLabel}
+                        </span>
+                      </div>
+
+                      <div>
+                        <p className={`text-sm font-medium ${titleTextClass}`}>
+                          {movement.note || "Movimiento registrado"}
+                        </p>
+                        <p className={`mt-1 text-xs ${softTextClass}`}>
+                          {movement.type === "sold" ? "Salida" : movement.type === "created" ? "Entrada" : "Cantidad"}: {Number(movement.quantity || 0)}
+                        </p>
+                      </div>
+
+                      <p className={`text-sm ${mediumTextClass}`}>{actor}</p>
+
+                      <p className={`font-mono text-xs ${softTextClass}`}>
+                        {formatMovementDate(movement.created_at)}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="mt-12 text-center">
           <p className={`text-xs uppercase tracking-[0.35em] ${isDark ? "text-white/25" : "text-gray-400"}`}>
-            Powered by Mahu Plexus
+            Mahu Plexus · Operación comercial
           </p>
         </div>
         </div>
       </div>
 
       {toast && (
-        <div className="fixed inset-0 z-50 pointer-events-none flex items-center justify-center px-4">
+        <div className="fixed inset-x-0 top-6 z-50 pointer-events-none flex justify-center px-4">
           <div
-            className={`premium-toast relative w-full max-w-sm overflow-hidden rounded-[24px] border px-5 py-4 text-center shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur-2xl ${
+            className={`premium-toast relative w-full max-w-[380px] overflow-hidden rounded-[22px] border px-4 py-3 shadow-[0_22px_70px_rgba(0,0,0,0.30)] backdrop-blur-2xl ${
               isDark
-                ? "border-cyan-300/20 bg-[#07111f]/88 text-white"
-                : "border-cyan-200 bg-white/95 text-slate-950"
+                ? "border-white/[0.10] bg-[#111827]/92 text-white"
+                : "border-slate-200 bg-white/95 text-slate-950"
             }`}
           >
-            <div className="premium-shimmer absolute inset-y-0 left-0 w-1/2 bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+            <div className="relative flex items-center gap-3">
+              <div
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-base font-black ${
+                  toast.type === "delete"
+                    ? "bg-rose-500/14 text-rose-300 premium-trash-icon ring-1 ring-red-400/20"
+                    : toast.type === "edit"
+                      ? "bg-amber-500/14 text-amber-300 premium-toast-icon ring-1 ring-amber-400/20"
+                      : toast.type === "update"
+                        ? "bg-blue-500/14 text-blue-300 premium-toast-icon ring-1 ring-blue-400/20"
+                        : toast.type === "export"
+                          ? "bg-emerald-500/14 text-emerald-300 premium-export-icon ring-1 ring-emerald-400/20"
+                          : toast.type === "error"
+                            ? "bg-rose-500/14 text-rose-300 premium-toast-icon ring-1 ring-rose-400/20"
+                            : "bg-sky-500/14 text-sky-300 premium-toast-icon ring-1 ring-sky-400/20"
+                }`}
+              >
+                {toast.type === "delete" ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M8 8h8m-7 3v6m6-6v6M5 8h14l-1 12H6L5 8Zm4-3h6l1 3H8l1-3Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : toast.type === "edit" ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="m14 8 2 2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                ) : toast.type === "update" ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M20 12a8 8 0 0 1-14.6 4.5M4 12A8 8 0 0 1 18.6 7.5M18 4v4h-4M6 20v-4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : toast.type === "export" ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 20h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : toast.type === "error" ? (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 8v5m0 3h.01M10.3 4.6 2.9 18a2 2 0 0 0 1.7 3h14.8a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                ) : (
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                    <path d="m5 12 4 4L19 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </div>
 
-            <div
-              className={`relative mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl text-xl font-black shadow-[0_0_32px_rgba(34,211,238,0.22)] ${
-                toast.type === "delete"
-                  ? "bg-gradient-to-br from-red-400 to-orange-300 text-white premium-trash-icon"
-                  : toast.type === "edit"
-                    ? "bg-gradient-to-br from-yellow-300 to-amber-400 text-slate-950 premium-toast-icon"
-                    : toast.type === "update"
-                      ? "bg-gradient-to-br from-sky-300 to-cyan-400 text-slate-950 premium-toast-icon"
-                      : toast.type === "export"
-                        ? "bg-gradient-to-br from-emerald-300 to-cyan-300 text-slate-950 premium-export-icon"
-                        : toast.type === "error"
-                          ? "bg-gradient-to-br from-red-400 to-rose-500 text-white premium-toast-icon"
-                          : "bg-gradient-to-br from-cyan-300 to-purple-400 text-slate-950 premium-toast-icon"
-              }`}
-            >
-              {toast.type === "delete"
-                ? "🗑️"
-                : toast.type === "edit"
-                  ? "✎"
-                  : toast.type === "update"
-                    ? "↻"
-                    : toast.type === "export"
-                      ? "↓"
-                      : toast.type === "error"
-                        ? "!"
-                        : "✓"}
+              <div className="min-w-0 flex-1">
+                <p className={`truncate text-sm font-semibold ${titleTextClass}`}>{toast.message}</p>
+                <p className={`mt-0.5 truncate text-xs ${softTextClass}`}>
+                  {toast.type === "delete"
+                    ? "Movimiento registrado en historial."
+                    : toast.type === "edit"
+                      ? "Listo para modificar detalles."
+                      : toast.type === "update"
+                        ? "Sincronizando cambios."
+                        : toast.type === "export"
+                          ? "Archivo generado correctamente."
+                          : toast.type === "error"
+                            ? "Revisa la acción e inténtalo otra vez."
+                            : "Operación completada."}
+                </p>
+              </div>
             </div>
 
-            <p className={`relative text-base font-semibold ${titleTextClass}`}>{toast.message}</p>
-            <p className={`relative mt-1 text-xs ${softTextClass}`}>
-              {toast.type === "delete"
-                ? "Eliminando y sincronizando inventario."
-                : toast.type === "edit"
-                  ? "Producto listo para editar."
-                  : toast.type === "update"
-                    ? "Actualizando datos del producto."
-                    : toast.type === "export"
-                      ? "Generando archivo organizado."
-                      : toast.type === "error"
-                        ? "Revisa la acción e inténtalo nuevamente."
-                        : "Guardando cambios del sistema."}
-            </p>
-
-            <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+            <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-500/15">
               <div
                 className={`toast-progress h-full rounded-full ${
                   toast.type === "delete"
-                    ? "bg-gradient-to-r from-red-400 to-orange-300"
+                    ? "bg-red-400"
                     : toast.type === "error"
-                      ? "bg-gradient-to-r from-red-400 to-rose-500"
+                      ? "bg-rose-400"
                       : toast.type === "export"
-                        ? "bg-gradient-to-r from-emerald-300 to-cyan-300"
-                        : "bg-gradient-to-r from-cyan-300 to-purple-400"
+                        ? "bg-emerald-400"
+                        : toast.type === "edit"
+                          ? "bg-amber-400"
+                          : "bg-blue-400"
                 }`}
               />
             </div>
@@ -2409,12 +2482,12 @@ export default function DashboardPage() {
           <div
             className={`relative w-full max-w-sm overflow-hidden rounded-[32px] border p-6 text-center shadow-[0_35px_120px_rgba(0,0,0,0.55)] ${
               isDark
-                ? "border-cyan-300/20 bg-[#050816]/92 text-white"
-                : "border-cyan-200 bg-white/95 text-slate-950"
+                ? "border-blue-500/20 bg-[#0F172A]/94 text-white"
+                : "border-blue-200 bg-white/95 text-white"
             }`}
           >
             <div className="system-glow absolute -top-16 left-1/2 h-36 w-36 -translate-x-1/2 rounded-full bg-cyan-400/20 blur-3xl" />
-            <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-[28px] bg-gradient-to-br from-cyan-300 to-purple-400 shadow-[0_0_55px_rgba(34,211,238,0.3)]">
+            <div className="relative mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-[28px] bg-gradient-to-br from-blue-500 to-indigo-500 shadow-[0_16px_50px_rgba(59,130,246,0.20)]">
               <div className="system-spin h-12 w-12 rounded-full border-4 border-slate-950/20 border-t-slate-950" />
             </div>
 
@@ -2424,7 +2497,7 @@ export default function DashboardPage() {
             </p>
 
             <div className="relative mt-5 h-1.5 overflow-hidden rounded-full bg-white/10">
-              <div className="premium-shimmer h-full w-1/2 rounded-full bg-gradient-to-r from-cyan-300 to-purple-400" />
+              <div className="premium-shimmer h-full w-1/2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500" />
             </div>
           </div>
         </div>

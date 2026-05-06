@@ -10,6 +10,13 @@ type CartItemInput = {
   quantity: number
 }
 
+function jsonResponse(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
+}
+
 function buildSaleCode(id: string, createdAt: string) {
   const date = new Date(createdAt)
   const year = date.getFullYear()
@@ -17,6 +24,35 @@ function buildSaleCode(id: string, createdAt: string) {
   const day = String(date.getDate()).padStart(2, "0")
 
   return `VTA-${year}${month}${day}-${id.slice(0, 4).toUpperCase()}`
+}
+
+async function registerMovement({
+  business_id,
+  product_id,
+  user_id,
+  type,
+  quantity = 0,
+  note,
+}: {
+  business_id: string
+  product_id?: string | null
+  user_id?: string | null
+  type: "created" | "updated" | "sold" | "deleted"
+  quantity?: number
+  note?: string
+}) {
+  const { error } = await supabase.from("inventory_movements").insert({
+    business_id,
+    product_id: product_id || null,
+    user_id: user_id || null,
+    type,
+    quantity,
+    note,
+  })
+
+  if (error) {
+    console.error("MOVEMENT ERROR:", error.message)
+  }
 }
 
 export async function GET(req: Request) {
@@ -27,13 +63,7 @@ export async function GET(req: Request) {
     const role = searchParams.get("role")
 
     if (!business_id) {
-      return new Response(
-        JSON.stringify({ error: "Falta business_id" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Falta business_id" }, 400)
     }
 
     let query = supabase
@@ -76,30 +106,13 @@ export async function GET(req: Request) {
     const { data, error } = await query
 
     if (error) {
-      return new Response(
-        JSON.stringify({ error: error.message }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: error.message }, 500)
     }
 
-    return new Response(
-      JSON.stringify({ data }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    return jsonResponse({ data })
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: "Error interno del servidor" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    console.error("SALES GET ERROR:", error)
+    return jsonResponse({ error: "Error interno del servidor" }, 500)
   }
 }
 
@@ -125,23 +138,11 @@ export async function POST(req: Request) {
     } = body
 
     if (!business_id) {
-      return new Response(
-        JSON.stringify({ error: "Falta business_id" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Falta business_id" }, 400)
     }
 
     if (!seller_id) {
-      return new Response(
-        JSON.stringify({ error: "Falta seller_id" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Falta seller_id" }, 400)
     }
 
     let cartItems: CartItemInput[] = []
@@ -163,13 +164,7 @@ export async function POST(req: Request) {
     }
 
     if (cartItems.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "Faltan productos para la venta" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Faltan productos para la venta" }, 400)
     }
 
     const productIds = cartItems.map((item) => item.product_id)
@@ -181,66 +176,55 @@ export async function POST(req: Request) {
       .eq("business_id", business_id)
 
     if (productsError) {
-      return new Response(
-        JSON.stringify({ error: productsError.message }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: productsError.message }, 500)
     }
 
     if (!products || products.length !== productIds.length) {
-      return new Response(
-        JSON.stringify({ error: "Uno o más productos no existen" }),
-        {
-          status: 404,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Uno o más productos no existen" }, 404)
     }
 
     const productMap = new Map(products.map((p) => [p.id, p]))
 
     let total = 0
+
     const saleItemsToInsert: {
       product_id: string
       quantity: number
       price: number
       subtotal: number
+      product_name: string
+      old_stock: number
+      new_stock: number
     }[] = []
 
     for (const item of cartItems) {
       const product = productMap.get(item.product_id)
 
       if (!product) {
-        return new Response(
-          JSON.stringify({ error: "Producto no encontrado" }),
-          {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-          }
+        return jsonResponse({ error: "Producto no encontrado" }, 404)
+      }
+
+      const currentStock = Number(product.stock || 0)
+      const soldQuantity = Number(item.quantity || 0)
+
+      if (currentStock < soldQuantity) {
+        return jsonResponse(
+          { error: `Stock insuficiente para ${product.name}` },
+          400
         )
       }
 
-      if (Number(product.stock) < Number(item.quantity)) {
-        return new Response(
-          JSON.stringify({ error: `Stock insuficiente para ${product.name}` }),
-          {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          }
-        )
-      }
-
-      const subtotal = Number(product.price) * Number(item.quantity)
+      const subtotal = Number(product.price) * soldQuantity
       total += subtotal
 
       saleItemsToInsert.push({
         product_id: product.id,
-        quantity: Number(item.quantity),
+        quantity: soldQuantity,
         price: Number(product.price),
         subtotal,
+        product_name: product.name,
+        old_stock: currentStock,
+        new_stock: currentStock - soldQuantity,
       })
     }
 
@@ -266,12 +250,9 @@ export async function POST(req: Request) {
       .single()
 
     if (saleError || !sale) {
-      return new Response(
-        JSON.stringify({ error: saleError?.message || "No se pudo crear la venta" }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
+      return jsonResponse(
+        { error: saleError?.message || "No se pudo crear la venta" },
+        500
       )
     }
 
@@ -283,12 +264,9 @@ export async function POST(req: Request) {
       .eq("id", sale.id)
 
     if (codeError) {
-      return new Response(
-        JSON.stringify({ error: codeError.message || "No se pudo guardar el código de venta" }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
+      return jsonResponse(
+        { error: codeError.message || "No se pudo guardar el código de venta" },
+        500
       )
     }
 
@@ -305,59 +283,48 @@ export async function POST(req: Request) {
       .insert(itemsPayload)
 
     if (itemError) {
-      return new Response(
-        JSON.stringify({ error: "No se pudo guardar el detalle de venta" }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
+      return jsonResponse(
+        { error: "No se pudo guardar el detalle de venta" },
+        500
       )
     }
 
     for (const item of saleItemsToInsert) {
-      const product = productMap.get(item.product_id)
-
-      if (!product) continue
-
       const { error: stockError } = await supabase
         .from("products")
         .update({
-          stock: Number(product.stock) - Number(item.quantity),
+          stock: item.new_stock,
+          updated_by: seller_id,
         })
         .eq("id", item.product_id)
 
       if (stockError) {
-        return new Response(
-          JSON.stringify({ error: `No se pudo actualizar stock de ${product.name}` }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
+        return jsonResponse(
+          { error: `No se pudo actualizar stock de ${item.product_name}` },
+          500
         )
       }
+
+      await registerMovement({
+        business_id,
+        product_id: item.product_id,
+        user_id: seller_id,
+        type: "sold",
+        quantity: item.quantity,
+        note: `Salida por venta ${saleCode}: ${item.product_name}`,
+      })
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        sale: {
-          ...sale,
-          sale_code: saleCode,
-        },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    return jsonResponse({
+      success: true,
+      sale: {
+        ...sale,
+        sale_code: saleCode,
+      },
+    })
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: "Error interno del servidor" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    console.error("SALES POST ERROR:", error)
+    return jsonResponse({ error: "Error interno del servidor" }, 500)
   }
 }
 
@@ -370,26 +337,14 @@ export async function DELETE(req: Request) {
     const month = searchParams.get("month")
 
     if (!business_id || !year || !month) {
-      return new Response(
-        JSON.stringify({ error: "Faltan business_id, year o month" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Faltan business_id, year o month" }, 400)
     }
 
     const monthNumber = Number(month)
     const yearNumber = Number(year)
 
     if (monthNumber < 1 || monthNumber > 12) {
-      return new Response(
-        JSON.stringify({ error: "Mes inválido" }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: "Mes inválido" }, 400)
     }
 
     const startDate = new Date(yearNumber, monthNumber - 1, 1, 0, 0, 0, 0)
@@ -403,23 +358,11 @@ export async function DELETE(req: Request) {
       .lte("created_at", endDate.toISOString())
 
     if (salesError) {
-      return new Response(
-        JSON.stringify({ error: salesError.message }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: salesError.message }, 500)
     }
 
     if (!salesToDelete || salesToDelete.length === 0) {
-      return new Response(
-        JSON.stringify({ success: true, deleted: 0 }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ success: true, deleted: 0 })
     }
 
     const saleIds = salesToDelete.map((sale) => sale.id)
@@ -430,13 +373,7 @@ export async function DELETE(req: Request) {
       .in("sale_id", saleIds)
 
     if (deleteItemsError) {
-      return new Response(
-        JSON.stringify({ error: deleteItemsError.message }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: deleteItemsError.message }, 500)
     }
 
     const { error: deleteSalesError } = await supabase
@@ -445,29 +382,12 @@ export async function DELETE(req: Request) {
       .in("id", saleIds)
 
     if (deleteSalesError) {
-      return new Response(
-        JSON.stringify({ error: deleteSalesError.message }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      )
+      return jsonResponse({ error: deleteSalesError.message }, 500)
     }
 
-    return new Response(
-      JSON.stringify({ success: true, deleted: saleIds.length }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    return jsonResponse({ success: true, deleted: saleIds.length })
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: "Error interno del servidor" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    )
+    console.error("SALES DELETE ERROR:", error)
+    return jsonResponse({ error: "Error interno del servidor" }, 500)
   }
 }
