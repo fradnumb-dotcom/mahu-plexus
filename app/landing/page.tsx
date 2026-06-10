@@ -343,7 +343,7 @@ export default function LandingPage() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo.png" alt="Mahu Plexus" style={{ height: 44, width: "auto" }} className="mb-4" />
               <p className="text-sm text-[#E6E6E6]/45 leading-relaxed max-w-xs">
-                Plataforma SaaS empresarial para gestión de ventas, inventario y operaciones. Conectamos ideas, creamos soluciones.
+                Plataforma  empresarial para gestión de ventas, inventario y operaciones. Conectamos ideas, creamos soluciones.
               </p>
               <div className="mt-4 flex flex-col gap-1">
                 <a href="mailto:mahuplexus@gmail.com" className="text-xs text-[#D4AF37]/65 hover:text-[#D4AF37] transition">mahuplexus@gmail.com</a>
