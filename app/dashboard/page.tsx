@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "../lib/supabase"
 import { Sidebar } from "../components/Sidebar"
-import { LoadingScreen } from "../components/LoadingScreen"
 import { MobileNav } from "../components/MobileNav"
 import { TrialModal } from "../components/TrialModal"
 import { ExpiredWall } from "../components/ExpiredWall"
 import { UsageMeter } from "../components/UsageMeter"
 import { LogoIntro } from "../components/LogoIntro"
 import { CountUp } from "../components/CountUp"
+import { KpiSkeleton, ChartsSkeleton } from "../components/Skeleton"
+import { EmptyState } from "../components/EmptyState"
 import { toast } from "../components/Toast"
 import { getSubscriptionInfo, activateTrialIfNew, getUsageStats, type SubscriptionInfo } from "../lib/subscription"
 
@@ -133,21 +134,31 @@ export default function DashboardPage() {
       setBId(p.business_id)
 
       if (p.business_id) {
-        // Load business name
-        const { data:biz } = await supabase.from("businesses").select("name").eq("id",p.business_id).single()
-        if (biz) setBName(biz.name||"Mi Tienda")
+        const bId = p.business_id
 
-        // Subscription + auto-trial
-        const wasNew = await activateTrialIfNew(p.business_id)
-        if (wasNew) setShowTrial(true)
-        const info = await getSubscriptionInfo(p.business_id)
-        setSubInfo(info)
-        const usageData = await getUsageStats(p.business_id, info.plan)
-        setUsage(usageData)
+        // Subscription chain runs first (auto-trial logic must stay ordered),
+        // but business name + the 3 data loads launch in parallel with it.
+        const subscriptionChain = (async () => {
+          const wasNew = await activateTrialIfNew(bId)
+          if (wasNew) setShowTrial(true)
+          const info = await getSubscriptionInfo(bId)
+          setSubInfo(info)
+          // Usage stats are non-critical for first paint → fill in after.
+          getUsageStats(bId, info.plan).then(u => setUsage(u)).catch(() => {})
+          return info
+        })()
 
-        await Promise.all([loadProducts(p.business_id), loadSales(p.business_id), loadMovements(p.business_id)])
+        // Business name (independent) — fire in parallel, no await blocking.
+        supabase.from("businesses").select("name").eq("id", bId).single()
+          .then(({ data: biz }) => { if (biz) setBName(biz.name || "Mi Tienda") })
+
+        // Critical data for first paint: products + sales (parallel).
+        // Movements (operational history) is non-critical → background, no block.
+        await Promise.all([loadProducts(bId), loadSales(bId), subscriptionChain])
+        loadMovements(bId).catch(() => {})
       }
-      setTimeout(()=>setLoading(false),400)
+      // Reveal dashboard immediately once critical data resolved (no artificial delay).
+      setLoading(false)
     })()
   }, [router, loadProducts, loadSales, loadMovements])
 
@@ -334,17 +345,27 @@ export default function DashboardPage() {
 
         <div className="px-5 py-5 md:px-8 space-y-5 pb-28 xl:pb-5">
 
+          {loading ? (
+            <>
+              <KpiSkeleton />
+              <ChartsSkeleton />
+            </>
+          ) : (
+          <>
           {/* ── KPI row ── */}
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
             {[
-              { label:"Ventas hoy",  node:<CountUp value={salesToday.length} />,                          sub:`${unitsToday} unidades`,       color:"text-[#D4AF37]" },
-              { label:"Total hoy",   node:<CountUp value={totalToday} prefix="S/ " decimals={2} />,        sub:`Ticket: S/ ${salesToday.length?( totalToday/salesToday.length).toFixed(2):"0.00"}`, color:"text-emerald-400" },
-              { label:"Esta semana", node:<CountUp value={weekTotal} prefix="S/ " decimals={2} />,         sub:`${weekSales.length} ventas`,   color:"text-[#E6E6E6]" },
-              { label:"Este mes",    node:<CountUp value={monthTotal} prefix="S/ " decimals={2} />,        sub:`${monthSales.length} ventas`,  color:"text-[#E6E6E6]" },
+              { label:"Ventas hoy",  node:<CountUp value={salesToday.length} />,                          sub:`${unitsToday} unidades`,       color:"text-[#D4AF37]", primary:false },
+              { label:"Total hoy",   node:<CountUp value={totalToday} prefix="S/ " decimals={2} />,        sub:`Ticket: S/ ${salesToday.length?( totalToday/salesToday.length).toFixed(2):"0.00"}`, color:"text-emerald-400", primary:true },
+              { label:"Esta semana", node:<CountUp value={weekTotal} prefix="S/ " decimals={2} />,         sub:`${weekSales.length} ventas`,   color:"text-[#E6E6E6]", primary:false },
+              { label:"Este mes",    node:<CountUp value={monthTotal} prefix="S/ " decimals={2} />,        sub:`${monthSales.length} ventas`,  color:"text-[#E6E6E6]", primary:false },
             ].map((k,i)=>(
-              <div key={i} className="mp-card p-4 rounded-2xl border border-[#2B2B30] mp-fade-up" style={{animationDelay:`${i*55}ms`}}>
-                <p className="text-[10px] uppercase tracking-[0.22em] text-[#E6E6E6]/38">{k.label}</p>
-                <p className={`mt-2 text-xl font-black tabular-nums ${k.color}`}>{k.node}</p>
+              <div key={i} className={`mp-card mp-kpi relative overflow-hidden p-4 rounded-2xl mp-fade-up ${k.primary ? "mp-kpi-primary" : ""}`} style={{animationDelay:`${i*55}ms`}}>
+                <div className="flex items-center gap-2">
+                  {k.primary && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 mp-pulse-dot" />}
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-[#E6E6E6]/38">{k.label}</p>
+                </div>
+                <p className={`mt-2 ${k.primary ? "text-2xl" : "text-xl"} font-black tabular-nums ${k.color} transition-all`}>{k.node}</p>
                 <p className="mt-1 text-xs text-[#E6E6E6]/35">{k.sub}</p>
               </div>
             ))}
@@ -532,8 +553,13 @@ export default function DashboardPage() {
 
             {/* Table */}
             {sortedInv.length===0 ? (
-              <div className="rounded-xl border border-dashed border-[#2B2B30] p-10 text-center">
-                <p className="text-[#E6E6E6]/35">Sin productos en esta vista</p>
+              <div className="rounded-xl border border-dashed border-[#2B2B30]">
+                <EmptyState
+                  compact
+                  icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 7l9-4 9 4-9 4-9-4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M3 7v10l9 4 9-4V7M12 11v10" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/></svg>}
+                  title="Sin productos en esta vista"
+                  description="Ajusta el filtro o agrega productos a tu inventario para verlos aquí."
+                />
               </div>
             ) : (
               <div className="overflow-hidden rounded-xl border border-[#2B2B30]">
@@ -597,8 +623,13 @@ export default function DashboardPage() {
             </div>
 
             {filteredMv.length===0 ? (
-              <div className="rounded-xl border border-dashed border-[#2B2B30] p-8 text-center">
-                <p className="text-sm text-[#E6E6E6]/35">Sin movimientos en este período.</p>
+              <div className="rounded-xl border border-dashed border-[#2B2B30]">
+                <EmptyState
+                  compact
+                  icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/><path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                  title="Sin movimientos en este período"
+                  description="Los cambios de inventario y ventas aparecerán en esta bitácora."
+                />
               </div>
             ) : (
               <div className="overflow-hidden rounded-xl border border-[#2B2B30]">
@@ -631,6 +662,8 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
+          </>
+          )}
 
           <div className="py-3 text-center">
             <p className="text-[10px] uppercase tracking-[0.35em] text-[#E6E6E6]/18">Mahu Plexus · Conectamos ideas, creamos soluciones</p>
@@ -650,8 +683,6 @@ export default function DashboardPage() {
       {subInfo?.isBlockedPage && (
         <ExpiredWall status={subInfo.status as "expired"|"suspended"} businessName={businessName} />
       )}
-
-      {loading && <LoadingScreen />}
 
       {showIntro && <LogoIntro onDone={() => setShowIntro(false)} />}
           <MobileNav active="dashboard" role={role as "owner" | "seller" | null} />

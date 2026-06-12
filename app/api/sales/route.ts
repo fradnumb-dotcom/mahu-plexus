@@ -61,6 +61,11 @@ export async function GET(req: Request) {
     const business_id = searchParams.get("business_id")
     const seller_id = searchParams.get("seller_id")
     const role = searchParams.get("role")
+    // Optional limit to avoid unbounded fetches as data grows.
+    // Default 1000 keeps dashboard aggregates (day/week/month, top products) correct
+    // for typical volumes while capping worst-case payload. Callers can override.
+    const limitParam = Number(searchParams.get("limit"))
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 5000) : 1000
 
     if (!business_id) {
       return jsonResponse({ error: "Falta business_id" }, 400)
@@ -98,6 +103,7 @@ export async function GET(req: Request) {
       `)
       .eq("business_id", business_id)
       .order("created_at", { ascending: false })
+      .limit(limit)
 
     if (role === "seller" && seller_id) {
       query = query.eq("seller_id", seller_id)

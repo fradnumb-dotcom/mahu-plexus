@@ -6,6 +6,7 @@ import { supabase } from "../lib/supabase"
 import { Sidebar } from "../components/Sidebar"
 import { LoadingScreen } from "../components/LoadingScreen"
 import { MobileNav } from "../components/MobileNav"
+import { EmptyState } from "../components/EmptyState"
 import { ExpiredWall } from "../components/ExpiredWall"
 import { toast } from "../components/Toast"
 import { getSubscriptionInfo, activateTrialIfNew, type SubscriptionInfo } from "../lib/subscription"
@@ -146,16 +147,23 @@ export default function SalesPage() {
         setRole(data?.role as "owner" | "seller")
 
         if (data?.business_id) {
-          await loadBusinessName(data.business_id)
-          await loadProducts(data.business_id)
-          await loadSales(data.business_id, data?.role as "owner" | "seller", user.id)
-          // Load + auto-activate trial
-          await activateTrialIfNew(data.business_id)
-          const info = await getSubscriptionInfo(data.business_id)
-          setSubInfo(info)
+          const bId = data.business_id
+          // Subscription chain stays ordered (trial activation must precede getSubscriptionInfo).
+          const subChain = (async () => {
+            await activateTrialIfNew(bId)
+            const info = await getSubscriptionInfo(bId)
+            setSubInfo(info)
+          })()
+          // Business name + products + sales + subscription all in parallel.
+          loadBusinessName(bId)
+          await Promise.all([
+            loadProducts(bId),
+            loadSales(bId, data?.role as "owner" | "seller", user.id),
+            subChain,
+          ])
         }
       } finally {
-        setTimeout(() => setLoading(false), 400)
+        setLoading(false)
       }
     }
     load()
@@ -708,8 +716,12 @@ export default function SalesPage() {
               </div>
 
               {groupedSales.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#2B2B30] p-10 text-center">
-                  <p className="text-[#E6E6E6]/40">No hay ventas registradas</p>
+                <div className="rounded-2xl border border-dashed border-[#2B2B30]">
+                  <EmptyState
+                    icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/><path d="M3 6h18M16 10a4 4 0 01-8 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>}
+                    title="No hay ventas registradas"
+                    description="Cuando registres tu primera venta aparecerá aquí con todo su detalle."
+                  />
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -735,7 +747,7 @@ export default function SalesPage() {
                           <div key={sale.id}>
                             {/* Compact row */}
                             <button onClick={() => setExpandedSale(expandedSale === sale.id ? null : sale.id)}
-                              className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition hover:bg-[#D4AF37]/4">
+                              className="mp-row-hover w-full flex items-center gap-3 px-4 py-2.5 text-left">
                               <span className="text-xs font-mono text-[#E6E6E6]/40 w-10 shrink-0">{fmtHour(sale.created_at)}</span>
                               <span className="flex-1 truncate text-xs text-[#E6E6E6]/70">{sale.customer_name || "Cliente general"}</span>
                               <span className="text-xs text-[#E6E6E6]/40 hidden sm:block">{sale.payment_method || "efectivo"}</span>
@@ -811,8 +823,13 @@ export default function SalesPage() {
               </div>
 
               {dailyProductReport.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[#2B2B30] p-10 text-center">
-                  <p className="text-[#E6E6E6]/40">No hay ventas registradas hoy</p>
+                <div className="rounded-2xl border border-dashed border-[#2B2B30]">
+                  <EmptyState
+                    compact
+                    icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M3 3v18h18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M7 15l3-4 3 2 4-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    title="No hay ventas registradas hoy"
+                    description="El resumen del día se actualiza automáticamente con cada venta."
+                  />
                 </div>
               ) : (
                 <div className="rounded-2xl border border-[#2B2B30] bg-[#141418]/60 overflow-hidden">
