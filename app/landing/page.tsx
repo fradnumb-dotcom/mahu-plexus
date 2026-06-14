@@ -91,7 +91,7 @@ const SERVICES = [
   {
     iconKey: "subscriptions",
     name: "Sistema de Suscripciones",
-    description: "Gestión de planes con prueba gratuita de 3 días. Pagos seguros vía Culqi (Visa, Mastercard, Yape). Control total de acceso.",
+    description: "Gestión de planes con prueba gratuita de 3 días. Pagos seguros vía Izipay (Visa, Mastercard, Yape). Control total de acceso.",
     price: "Configuración incluida",
     tag: "Suscripciones",
   },
@@ -235,10 +235,10 @@ export default function LandingPage() {
               <div>
                 <h3 className="text-xl font-black text-[#E6E6E6] mb-3">Proceso de pago seguro</h3>
                 <p className="text-sm text-[#E6E6E6]/50 leading-relaxed mb-4">
-                  Al elegir tu plan, eres redirigido al formulario de pago de <strong className="text-[#D4AF37]">Culqi</strong>, la plataforma de pagos más confiable del Perú. Tu información bancaria nunca pasa por nuestros servidores.
+                  Al elegir tu plan, eres redirigido al formulario de pago de <strong className="text-[#D4AF37]">Izipay</strong>, una de las plataformas de pago más confiables del Perú. Tu información bancaria nunca pasa por nuestros servidores.
                 </p>
                 <div className="space-y-2">
-                  {["Selecciona tu plan", "Ingresa tus datos de pago en Culqi", "Recibe confirmación instantánea", "Accede al sistema de inmediato"].map((step, i) => (
+                  {["Selecciona tu plan", "Ingresa tus datos de pago en Izipay", "Recibe confirmación instantánea", "Accede al sistema de inmediato"].map((step, i) => (
                     <div key={step} className="flex items-center gap-3 text-sm text-[#E6E6E6]/60">
                       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#D4AF37]/15 text-[10px] font-black text-[#D4AF37]">{i+1}</span>
                       {step}
@@ -373,7 +373,7 @@ export default function LandingPage() {
           <div className="border-t border-[#2B2B30]/60 pt-8 flex flex-col items-center justify-between gap-4 md:flex-row">
             <p className="text-xs text-[#E6E6E6]/28">© {new Date().getFullYear()} Mahu Plexus. Todos los derechos reservados.</p>
             <div className="flex items-center gap-4 text-xs text-[#E6E6E6]/28">
-              <span>🔒 Pagos seguros vía Culqi</span>
+              <span>🔒 Pagos seguros vía Izipay</span>
               <span>🛡 SSL certificado</span>
               <span>🇵🇪 Hecho en Perú</span>
             </div>

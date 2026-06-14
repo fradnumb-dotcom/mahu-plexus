@@ -14,7 +14,7 @@ const SECTIONS = [
   },
   {
     title: "3. Finalidad del Tratamiento",
-    content: "Sus datos se utilizan exclusivamente para: prestar el servicio de gestión empresarial contratado; gestionar su suscripción y procesar pagos a través de Culqi; enviar notificaciones relevantes del servicio; mejorar la plataforma mediante análisis agregados y anónimos; y cumplir obligaciones legales aplicables.",
+    content: "Sus datos se utilizan exclusivamente para: prestar el servicio de gestión empresarial contratado; gestionar su suscripción y procesar pagos a través de Izipay; enviar notificaciones relevantes del servicio; mejorar la plataforma mediante análisis agregados y anónimos; y cumplir obligaciones legales aplicables.",
   },
   {
     title: "4. Base Legal",
@@ -22,7 +22,7 @@ const SECTIONS = [
   },
   {
     title: "5. Compartición de Datos",
-    content: "No vendemos ni compartimos sus datos personales con terceros con fines comerciales. Solo compartimos datos con: Supabase (infraestructura de base de datos y autenticación), Culqi (procesamiento de pagos, certificado PCI-DSS), y proveedores de hosting bajo acuerdos de confidencialidad. Sus datos de clientes e inventario son de su exclusiva propiedad.",
+    content: "No vendemos ni compartimos sus datos personales con terceros con fines comerciales. Solo compartimos datos con: Supabase (infraestructura de base de datos y autenticación), Izipay (procesamiento de pagos, certificado PCI-DSS), y proveedores de hosting bajo acuerdos de confidencialidad. Sus datos de clientes e inventario son de su exclusiva propiedad.",
   },
   {
     title: "6. Seguridad",

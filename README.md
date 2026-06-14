@@ -15,10 +15,11 @@ Abre [http://localhost:3000](http://localhost:3000) en tu navegador.
 
 El archivo `.env.local` ya está configurado con las credenciales de Supabase.
 
-Para activar la integración de Culqi, agrega cuando estés listo:
+Para activar la integración de Izipay, agrega cuando estés listo (Back Office Vendedor → Claves de API REST):
 ```
-CULQI_PUBLIC_KEY=pk_live_...
-CULQI_SECRET_KEY=sk_live_...
+IZIPAY_USERNAME=...
+IZIPAY_PASSWORD=...
+NEXT_PUBLIC_IZIPAY_PUBLIC_KEY=...
 ```
 
 Para activar el API de consulta de DNI, agrega:
@@ -34,7 +35,7 @@ app/
 ├── api/
 │   ├── create-client/   → Crear cuenta owner + negocio
 │   ├── create-seller/   → Crear vendedores
-│   ├── culqi/           → Integración de pagos Culqi
+│   ├── izipay/          → Integración de pagos Izipay (FormToken + IPN)
 │   ├── delete-seller/   → Eliminar vendedores
 │   ├── dni/             → Consulta de DNI/CEE
 │   ├── products/        → CRUD de productos
@@ -67,14 +68,17 @@ app/
 - Texto: `#E6E6E6`
 - Blanco: `#FFFFFF`
 
-## 💳 Integración Culqi
+## 💳 Integración Izipay
 
-La arquitectura de pagos está lista en `/api/culqi/route.ts`.
+La arquitectura de pagos vive en `/api/izipay/route.ts` (genera el formToken) y
+`/api/izipay/webhook/route.ts` (recibe el IPN y activa la suscripción). El SDK
+del formulario se carga bajo demanda desde `components/IzipayCheckout.tsx`.
 
 Para activar cobros reales:
-1. Agrega `CULQI_SECRET_KEY` en `.env.local`
-2. Instala Culqi.js en el frontend: `npm install culqi-js`
-3. Conecta el formulario de tarjeta en `/subscription/page.tsx`
+1. Agrega `IZIPAY_USERNAME`, `IZIPAY_PASSWORD` y `NEXT_PUBLIC_IZIPAY_PUBLIC_KEY` en `.env.local` (y en Vercel).
+2. En el Back Office Vendedor → Reglas de notificación, configura la URL del IPN:
+   `https://TU-DOMINIO/api/izipay/webhook`
+3. Prueba con credenciales TEST; al confirmar, cambia a las de PRODUCCIÓN.
 
 ## 📋 Planes de suscripción
 

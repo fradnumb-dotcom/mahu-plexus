@@ -178,7 +178,7 @@ export default function LoginPage() {
                   { icon: "◈", label: "Ventas ultra-rápidas con búsqueda instantánea" },
                   { icon: "◉", label: "Inventario empresarial en tiempo real" },
                   { icon: "◆", label: "Reportes PDF con un clic" },
-                  { icon: "◇", label: "Integración Culqi para pagos online" },
+                  { icon: "◇", label: "Integración Izipay para pagos en línea" },
                 ].map(f => (
                   <div key={f.label} className="flex items-center gap-3 mp-fade-up" style={{animationDelay:"80ms"}}>
                     <div className="flex h-7 w-7 items-center justify-center rounded-xl border border-[#D4AF37]/18 bg-[#D4AF37]/8 text-[#D4AF37] text-xs">

@@ -1,6 +1,6 @@
 import { supabase } from "./supabase"
 
-export type SubscriptionStatus = "trial" | "active" | "expired" | "suspended" | "none"
+export type SubscriptionStatus = "trial" | "active" | "canceled" | "expired" | "suspended" | "none"
 export type SubscriptionPlan  = "trial" | "daily" | "weekly" | "monthly" | null
 
 export interface SubscriptionInfo {
@@ -47,8 +47,8 @@ export async function getSubscriptionInfo(businessId: string): Promise<Subscript
     const plan     = (data.subscription_plan as SubscriptionPlan) || null
     const endDate  = data.current_period_end || data.trial_ends_at
 
-    // Auto-detect expiry
-    if ((status === "trial" || status === "active") && endDate) {
+    // Auto-detect expiry (incluye canceladas: el acceso se mantiene hasta el fin de período)
+    if ((status === "trial" || status === "active" || status === "canceled") && endDate) {
       if (now > new Date(endDate)) {
         status = "expired"
         // Fire-and-forget update
@@ -65,7 +65,7 @@ export async function getSubscriptionInfo(businessId: string): Promise<Subscript
     const daysLeft    = Math.floor(msLeft / 86400000)
     const hoursLeft   = Math.floor((msLeft % 86400000) / 3600000)
     const minutesLeft = Math.floor((msLeft % 3600000) / 60000)
-    const isValid     = status === "active" || status === "trial"
+    const isValid     = status === "active" || status === "trial" || status === "canceled"
 
     return {
       status,

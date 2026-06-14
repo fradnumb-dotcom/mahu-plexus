@@ -35,7 +35,7 @@
 - [x] Validación de duplicados
 - [x] Service role key solo en backend
 
-## Legal (Culqi)
+## Legal (Izipay)
 - [x] Términos y Condiciones
 - [x] Política de Privacidad
 - [x] Política de Devoluciones

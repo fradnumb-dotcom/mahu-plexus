@@ -3,7 +3,7 @@
 ## 1. Requisitos previos
 - Cuenta en [Vercel](https://vercel.com)
 - Proyecto Supabase configurado
-- Cuenta Culqi (para pagos reales)
+- Cuenta Izipay (para pagos reales)
 
 ## 2. Variables de entorno (Vercel → Settings → Environment Variables)
 
@@ -13,8 +13,9 @@
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave pública (anon) | `sb_publishable_...` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Clave de servicio (SECRETA) | `sb_secret_...` |
 | `NEXT_PUBLIC_APP_URL` | **URL de producción** (sin slash final) | `https://mahuplexus.vercel.app` |
-| `CULQI_PUBLIC_KEY` | Clave pública Culqi | `pk_live_...` |
-| `CULQI_SECRET_KEY` | Clave secreta Culqi | `sk_live_...` |
+| `IZIPAY_USERNAME` | Usuario/shopId (API REST) | `12345678` |
+| `IZIPAY_PASSWORD` | Clave de API REST (SECRETA) | `prodpassword_...` |
+| `NEXT_PUBLIC_IZIPAY_PUBLIC_KEY` | Clave pública del SDK | `12345678:publickey_...` |
 | `DNI_API_TOKEN` | Token Factiliza (DNI/RUC) | `eyJ...` |
 
 > **CRÍTICO:** `NEXT_PUBLIC_APP_URL` debe ser tu dominio real de producción.
@@ -56,4 +57,4 @@ Vercel detecta Next.js automáticamente. No requiere configuración de build esp
 - Verifica que `NEXT_PUBLIC_APP_URL` apunte al dominio final.
 - Prueba el registro → debe llegar correo con enlace al dominio correcto.
 - Prueba login, recuperación de contraseña.
-- Activa las claves `live` de Culqi cuando estés listo para cobros reales.
+- Configura las credenciales de PRODUCCIÓN de Izipay y la URL del IPN (`/api/izipay/webhook`) en el Back Office Vendedor cuando estés listo para cobros reales.

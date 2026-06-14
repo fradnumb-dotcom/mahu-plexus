@@ -1,5 +1,19 @@
 # Mahu Plexus v3.1 — Registro de cambios
 
+## v3.2 — Migración de pasarela de pago: Culqi → Izipay
+- Eliminada la lógica específica de Culqi (`/api/culqi`).
+- Nueva integración Izipay (modelo FormToken / micuentaweb):
+  - `/api/izipay` genera el `formToken` (validación y precios en backend).
+  - `/api/izipay/webhook` recibe el IPN, valida la firma HMAC-SHA256 y activa la suscripción.
+  - `components/IzipayCheckout.tsx` monta el formulario embebido (SDK cargado bajo demanda).
+- Nuevas variables: `IZIPAY_USERNAME`, `IZIPAY_PASSWORD`, `NEXT_PUBLIC_IZIPAY_PUBLIC_KEY`, `IZIPAY_HMAC_KEY` (opc.), `IZIPAY_API_BASE` (opc.).
+- Seguridad: `POST /api/izipay` ahora exige sesión autenticada de Supabase; el `business_id`
+  y el correo se derivan de la sesión (cabecera Authorization: Bearer), no del cliente.
+- Panel de suscripción rediseñado con estética sobria (estilo Stripe/Linear): sin glows,
+  gradientes agresivos ni animaciones decorativas.
+- Sin cambios en autenticación, Supabase, inventario, ventas, clientes ni dashboard.
+
+
 ## Branding e identidad visual
 - **Favicon profesional MP** generado en `.ico` (múltiples resoluciones 16–256px),
   `.svg` vectorial y `.png` (32px + apple-icon 180px). Monograma M+P dorado sobre negro.
@@ -18,7 +32,7 @@
 ## Marcas de pago oficiales
 - Nuevo componente `PaymentMarks.tsx`: marcas Visa, Mastercard, American Express y
   Yape renderizadas como SVG inline limpios (sin assets externos ni problemas de licencia).
-- Integradas en la página de suscripción (sección Culqi).
+- Integradas en la página de suscripción (sección de pagos).
 
 ## Modo claro / oscuro
 - Cobertura ampliada de light mode en `globals.css`: overrides completos para todos
@@ -45,7 +59,7 @@
 
 ## NO modificado (estabilidad preservada)
 - Lógica de autenticación Supabase (login, register, recuperación).
-- APIs de ventas, inventario, vendedores, DNI, RUC, Culqi, suscripciones.
+- APIs de ventas, inventario, vendedores, DNI, RUC, suscripciones.
 - Tablas y relaciones de Supabase.
 - Consulta DNI/RUC.
 - Flujo de email: se mantiene `email_confirm: true` (auto-confirmado) para no

@@ -135,7 +135,7 @@ export default function SettingsPage() {
               <div>
                 <p className="text-sm font-bold text-[#D4AF37]">Suscripción activa</p>
                 <p className="mt-1 text-xs text-[#E6E6E6]/45 leading-relaxed">
-                  Plan: {subInfo?.plan||"trial"} · Planes de pago con Culqi estarán disponibles próximamente.
+                  Plan: {subInfo?.plan||"trial"} · Planes de pago disponibles vía Izipay.
                 </p>
                 <a href="/subscription" className="mt-1.5 inline-block text-xs text-[#D4AF37] hover:underline">Ver planes →</a>
               </div>
