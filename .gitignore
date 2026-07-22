@@ -36,3 +36,18 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Cache
+.turbo
+
+# Editor
+.vscode/settings.json
+
+# OS
+Thumbs.db
